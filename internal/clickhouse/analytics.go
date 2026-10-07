@@ -2579,7 +2579,7 @@ func (s *Store) GetAnalyticsSignalSessions(
 		if err != nil {
 			return db.SignalSessionsResponse{}, err
 		}
-		return db.BuildToolMetricEvidence(rows, signal, f.EvidenceOffset, limit), nil
+		return db.BuildToolMetricEvidence(rows, signal, f.ToolName, f.EvidenceOffset, limit), nil
 	}
 	if !db.IsSupportedAnalyticsSignal(signal) {
 		return db.SignalSessionsResponse{}, db.ErrUnsupportedAnalyticsSignal

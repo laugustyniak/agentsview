@@ -2789,10 +2789,7 @@ func BuildToolsAnalytics(rows []ToolAnalyticsRow) ToolsAnalyticsResponse {
 		}
 		trendBuckets[week][row.Category] += row.Count
 
-		name := strings.TrimSpace(row.ToolName)
-		if name == "" {
-			name = "Unknown"
-		}
+		name := normalizeToolName(row.ToolName)
 		key := row.Category + "\x00" + name
 		acc := toolCounts[key]
 		if acc == nil {
@@ -4288,7 +4285,7 @@ func (db *DB) GetAnalyticsSignalSessions(
 		if err != nil {
 			return SignalSessionsResponse{}, err
 		}
-		return BuildToolMetricEvidence(rows, signal, f.EvidenceOffset, limit), nil
+		return BuildToolMetricEvidence(rows, signal, f.ToolName, f.EvidenceOffset, limit), nil
 	}
 	if !IsSupportedAnalyticsSignal(signal) {
 		return SignalSessionsResponse{}, ErrUnsupportedAnalyticsSignal

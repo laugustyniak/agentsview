@@ -82,9 +82,6 @@ func ToolMetricPredicate(alias, signal string) string {
 // ToolSelectionPredicates shares row identity and freshness while each store binds values.
 func ToolSelectionPredicates(alias, versionColumn string, f AnalyticsFilter, bind func(string) string) []string {
 	predicates := []string{}
-	if f.ToolName != "" {
-		predicates = append(predicates, "COALESCE(NULLIF(TRIM(COALESCE("+alias+".tool_name, '')), ''), 'Unknown') = "+bind(f.ToolName))
-	}
 	if f.ToolCategory != "" {
 		predicates = append(predicates, alias+".category = "+bind(f.ToolCategory))
 	}
@@ -99,12 +96,15 @@ func toolObservationFreshSQL(versionColumn string) string {
 }
 
 // BuildToolMetricEvidence returns distinct contributing sessions in stable order.
-func BuildToolMetricEvidence(rows []ToolAnalyticsRow, signal string, offset, limit int) SignalSessionsResponse {
+func BuildToolMetricEvidence(rows []ToolAnalyticsRow, signal, toolName string, offset, limit int) SignalSessionsResponse {
 	if limit <= 0 || limit > 20 {
 		limit = 10
 	}
 	examples := make(map[string]SignalSessionExample)
 	for _, row := range rows {
+		if toolName != "" && normalizeToolName(row.ToolName) != normalizeToolName(toolName) {
+			continue
+		}
 		count := row.RepeatedCalls
 		if signal == "tool_empty_rate" {
 			count = row.EmptyCalls
@@ -147,4 +147,12 @@ func BuildToolMetricEvidence(rows []ToolAnalyticsRow, signal string, offset, lim
 		result.NextOffset = &end
 	}
 	return result
+}
+
+func normalizeToolName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "Unknown"
+	}
+	return name
 }

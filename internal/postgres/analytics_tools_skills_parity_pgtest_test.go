@@ -432,6 +432,9 @@ func TestToolEffectivenessSQLitePGParity(t *testing.T) {
 		if fixture.empty {
 			calls = append(calls, db.Message{SessionID: fixture.id, Ordinal: 4, Role: "assistant", Timestamp: "2025-06-02T12:00:00Z", Model: fixture.model, ToolCalls: []db.ToolCall{{SessionID: fixture.id, ToolName: "readFile", Category: fixture.category, ResultEvents: []db.ToolResultEvent{{Status: "completed"}}}}})
 		}
+		if fixture.id == "ordinary-a" {
+			calls[1].ToolCalls[0].ToolName = "\treadFile\u2002"
+		}
 		session.MessageCount = len(calls)
 		require.NoError(t, local.UpsertSession(t.Context(), session))
 		update, findings := ingest.ComputeSignalsAndSecrets(session, calls)
@@ -513,9 +516,9 @@ func TestToolEffectivenessSQLitePGParity(t *testing.T) {
 		assert.Equal(t, none, actual)
 		assert.Empty(t, none.Sessions)
 		filter.ToolCategory = ""
-		allCategories, err := local.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
+		allCategories, err := local.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 0)
 		require.NoError(t, err)
-		actual, err = remote.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
+		actual, err = remote.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 0)
 		require.NoError(t, err)
 		assert.Equal(t, allCategories, actual)
 		assert.Equal(t, first.Total, allCategories.Total)
