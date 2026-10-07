@@ -172,6 +172,17 @@ describe("ToolUsage", () => {
     unmount(component);
   });
 
+  it("renders measured zero rates as text", async () => {
+    seedRates();
+    analytics.tools!.by_tool![0]!.repeat_rate = 0;
+    const component = mount(ToolUsage, { target: document.body });
+    await tick();
+    expect(document.body.textContent).toContain("0.0%");
+    expect(document.querySelector('[aria-label="Grep Repeat rate"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Grep Empty rate"]')).not.toBeNull();
+    unmount(component);
+  });
+
   it("opens contributing sessions with the active filters and ignores an older response", async () => {
     seedRates();
     analytics.project = "project-a";

@@ -17,7 +17,6 @@ import (
 
 	"go.kenn.io/agentsview/internal/config"
 	"go.kenn.io/agentsview/internal/db"
-	"go.kenn.io/agentsview/internal/ingest"
 	"go.kenn.io/agentsview/internal/parser"
 	"go.kenn.io/agentsview/internal/secrets"
 	"go.kenn.io/agentsview/internal/signals"
@@ -740,7 +739,7 @@ func (s *codexStagingSink) PublishToolResultImages(ctx context.Context) error {
 			if participates == 0 {
 				summary = ""
 			}
-			candidate := singleSummaryCandidate{length: len(summary), outcome: ingest.ClassifyToolResult(s.toolNameByCallKey[callKey], s.categoryByCallKey[callKey], summary, s.statusByCallKey[callKey])}
+			candidate := singleSummaryCandidate{length: len(summary), outcome: string(signals.ClassifyToolOutcome(signals.ToolCallRow{ToolName: s.toolNameByCallKey[callKey], Category: s.categoryByCallKey[callKey], ResultContent: summary, ResultContentLength: len(summary), EventStatus: s.statusByCallKey[callKey], ResultContentUnknown: signals.IsUnknownResultContent(summary)}))}
 			if !s.disableSignals {
 				candidate.failure = signals.IsFailure(signals.ToolCallRow{
 					Category:      s.categoryByCallKey[callKey],
@@ -1002,14 +1001,17 @@ func (s *codexStagingSink) ResolveSummary(
 		s.contentFailures[stageKey] = contentVerdict
 	}
 	s.recordContentOutcome(stageKey, summary, s.statusByCallKey[stageKey])
-	selectedEvents := make([]db.ToolResultEvent, 0, len(latest)+1)
-	for _, content := range latest {
-		selectedEvents = append(selectedEvents, db.ToolResultEvent{Content: content})
+	selectedEvents := make([]signals.ResultContentEvidence, 0, len(latest)+1)
+	for agent, content := range latest {
+		selectedEvents = append(selectedEvents, signals.ResultContentEvidence{AgentID: agent, Content: content})
 	}
 	if hasAnon {
-		selectedEvents = append(selectedEvents, db.ToolResultEvent{Content: lastAnon})
+		selectedEvents = append(selectedEvents, signals.ResultContentEvidence{Content: lastAnon})
 	}
-	if !s.disableSignals && ingest.ToolResultContentUnknown(db.ToolCall{ResultEvents: selectedEvents}) && s.contentFailures[stageKey].Outcome != "errored" {
+	if eventCount == 1 {
+		selectedEvents = []signals.ResultContentEvidence{{Content: soleContent}}
+	}
+	if !s.disableSignals && signals.ToolResultContentUnknown(summary, eventCount, selectedEvents) && s.contentFailures[stageKey].Outcome != "errored" {
 		verdict := s.contentFailures[stageKey]
 		verdict.Outcome = "unknown"
 		s.contentFailures[stageKey] = verdict
@@ -1108,6 +1110,6 @@ func (s *codexStagingSink) recordContentOutcome(key, content, status string) {
 		s.contentFailures = make(map[string]db.StagedToolVerdict)
 	}
 	verdict := s.contentFailures[key]
-	verdict.Outcome = ingest.ClassifyToolResult(s.toolNameByCallKey[key], s.categoryByCallKey[key], content, status)
+	verdict.Outcome = string(signals.ClassifyToolOutcome(signals.ToolCallRow{ToolName: s.toolNameByCallKey[key], Category: s.categoryByCallKey[key], ResultContent: content, ResultContentLength: len(content), EventStatus: status, ResultContentUnknown: signals.IsUnknownResultContent(content)}))
 	s.contentFailures[key] = verdict
 }

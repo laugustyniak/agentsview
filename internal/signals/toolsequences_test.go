@@ -172,7 +172,7 @@ func TestClassifyToolOutcome(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, classifyToolOutcome(tt.call))
+			assert.Equal(t, tt.want, ClassifyToolOutcome(tt.call))
 		})
 	}
 }

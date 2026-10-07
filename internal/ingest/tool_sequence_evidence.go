@@ -15,9 +15,3 @@ func ToolResultContentUnknown(call db.ToolCall) bool {
 	}
 	return signals.ToolResultContentUnknown(call.ResultContent, len(events), events)
 }
-
-// ClassifyToolResult uses the sequence classifier while projected content is available.
-func ClassifyToolResult(name, category, content, status string) string {
-	result := signals.ExtractToolSequences([]signals.ToolCallRow{{ToolName: name, Category: category, ResultContent: content, ResultContentLength: len(content), EventStatus: status, ResultContentUnknown: signals.IsUnknownResultContent(content)}}, false)
-	return string(result.Calls[0].Outcome)
-}

@@ -7,10 +7,6 @@ import (
 	"strings"
 )
 
-func SessionComplete(status *string) bool {
-	return status != nil && (*status == "clean" || *status == "awaiting_user")
-}
-
 type ResultContentEvidence struct {
 	AgentID string
 	Content string

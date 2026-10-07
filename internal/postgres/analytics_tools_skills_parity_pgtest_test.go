@@ -564,5 +564,16 @@ func TestToolRateCategoryNumeratorSQLitePGParity(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, none, actual)
 		assert.Empty(t, none.Sessions)
+		filter.ToolCategory = ""
+		allCategories, err := local.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
+		require.NoError(t, err)
+		actual, err = remote.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
+		require.NoError(t, err)
+		assert.Equal(t, allCategories, actual)
+		assert.Equal(t, first.Total, allCategories.Total)
+		filter.ToolName, filter.ToolCategory = "", "Read"
+		categoryOnly, err := remote.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
+		require.NoError(t, err)
+		assert.Equal(t, allCategories, categoryOnly)
 	}
 }

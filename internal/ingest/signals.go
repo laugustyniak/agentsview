@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.kenn.io/agentsview/internal/db"
+	"go.kenn.io/agentsview/internal/parser"
 	"go.kenn.io/agentsview/internal/secrets"
 	"go.kenn.io/agentsview/internal/signals"
 )
@@ -153,7 +154,7 @@ func ComputeSignalsFromToolRows(
 			RunawayToolLoopCount:        heuristics.RunawayToolLoopCount,
 		},
 	}
-	complete := signals.SessionComplete(session.TerminationStatus)
+	complete := parser.TerminationComplete(session.TerminationStatus)
 	extracted := signals.ExtractToolSequences(rows, complete)
 	update.ToolObservations = make([]db.ToolObservation, len(extracted.Calls))
 	for i, call := range extracted.Calls {

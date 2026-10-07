@@ -84,7 +84,7 @@ func ToolSelectionPredicates(alias, fresh string, f AnalyticsFilter, bind func(s
 	if f.ToolName != "" {
 		predicates = append(predicates, "COALESCE(NULLIF(TRIM(COALESCE("+alias+".tool_name, '')), ''), 'Unknown') = "+bind(f.ToolName))
 	}
-	if f.ToolCategory != "" || (f.ToolName != "" && IsToolMetric(f.ToolMetric)) {
+	if f.ToolCategory != "" {
 		predicates = append(predicates, alias+".category = "+bind(f.ToolCategory))
 	}
 	if predicate := ToolMetricPredicate(alias, f.ToolMetric); predicate != "" {

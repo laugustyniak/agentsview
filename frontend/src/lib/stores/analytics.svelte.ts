@@ -455,7 +455,7 @@ class AnalyticsStore {
     return p;
   }
 
-  private filterParams(
+  filterParams(
     opts: {
       includeProject?: boolean;
       includeTime?: boolean;
@@ -471,10 +471,6 @@ class AnalyticsStore {
       p.to = this.selectedActivityRange.to;
     }
     return p;
-  }
-
-  toolEvidenceParams(): AnalyticsParams {
-    return this.filterParams();
   }
 
   signalEvidenceParams(): AnalyticsParams {

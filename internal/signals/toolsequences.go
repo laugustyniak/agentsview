@@ -120,7 +120,7 @@ type ToolSequenceContinuation struct {
 }
 
 func SequenceFactFor(call ToolCallRow) ToolSequenceFact {
-	fact := ToolSequenceFact{CallPos: CallPos{call.MessageOrdinal, call.CallIndex}, ToolName: call.ToolName, Outcome: classifyToolOutcome(call)}
+	fact := ToolSequenceFact{CallPos: CallPos{call.MessageOrdinal, call.CallIndex}, ToolName: call.ToolName, Outcome: ClassifyToolOutcome(call)}
 	if call.InputJSON != "" {
 		fact.InputHash = fmt.Sprintf("%x", sha256.Sum256([]byte(call.InputJSON)))
 		if normalized, ok := normalizeToolInput(call.InputJSON); ok {
@@ -174,7 +174,8 @@ func startsToolSequence(outcome ToolOutcome) bool {
 	return outcome == ToolOutcomeErrored || outcome == ToolOutcomeEmpty
 }
 
-func classifyToolOutcome(call ToolCallRow) ToolOutcome {
+// ClassifyToolOutcome classifies one retained tool result.
+func ClassifyToolOutcome(call ToolCallRow) ToolOutcome {
 	if IsFailure(call) {
 		return ToolOutcomeErrored
 	}

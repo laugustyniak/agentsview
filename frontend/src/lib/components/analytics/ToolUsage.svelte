@@ -46,7 +46,7 @@
   let evidenceLoading = $state(false);
   let evidenceError = $state<string | null>(null);
   const evidenceRead = new LatestRead();
-  const evidenceParams = $derived(analytics.toolEvidenceParams());
+  const evidenceParams = $derived(analytics.filterParams());
   const evidenceKey = $derived(JSON.stringify({ params: evidenceParams, tools: analytics.tools }));
 
   $effect(() => {
@@ -239,6 +239,8 @@
                   <span class="tool-rate" data-label={column.label} title={rateTitle(tool, column.metric)}>
                     {#if tool[column.field] == null}
                       {m.analytics_tool_unavailable()}
+                    {:else if tool[column.field] === 0}
+                      0.0%
                     {:else}
                       <Button surface="soft" size="sm" onclick={() => loadEvidence(tool.tool_name, tool.category, column.metric)} ariaLabel={`${tool.tool_name} ${column.label}`}>
                         {(tool[column.field]! * 100).toFixed(1)}%
