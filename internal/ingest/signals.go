@@ -155,6 +155,16 @@ func ComputeSignalsFromToolRows(
 			RunawayToolLoopCount:        heuristics.RunawayToolLoopCount,
 		},
 	}
+	complete := session.TerminationStatus != nil && (*session.TerminationStatus == "clean" || *session.TerminationStatus == "awaiting_user")
+	extracted := signals.ExtractToolSequences(rows, complete)
+	update.ToolObservations = make([]db.ToolObservation, len(extracted.Calls))
+	for i, call := range extracted.Calls {
+		update.ToolObservations[i] = db.ToolObservation{MessageOrdinal: call.MessageOrdinal, CallIndex: call.CallIndex, Outcome: string(call.Outcome), Repeat: string(call.Repeat)}
+	}
+	for _, sequence := range extracted.Sequences {
+		ending := string(sequence.Ending)
+		update.ToolObservations[sequence.Start].SequenceEnding = &ending
+	}
 	return RefreshSignalRecencyAt(session, messages, update, time.Now())
 }
 
@@ -207,14 +217,19 @@ func ExtractToolCallRows(messages []db.Message) []signals.ToolCallRow {
 			if count := len(call.ResultEvents); count > 0 {
 				status = call.ResultEvents[count-1].Status
 			}
+			var stagedOutcome signals.ToolOutcome
+			if call.StagedOutcome != nil {
+				stagedOutcome = signals.ToolOutcome(*call.StagedOutcome)
+			}
 			rows = append(rows, signals.ToolCallRow{
-				ToolName: call.ToolName, Category: call.Category,
+				ContentOutcome: stagedOutcome,
+				ToolName:       call.ToolName, Category: call.Category,
 				InputJSON: call.InputJSON, ResultContent: call.ResultContent,
 				FilePath:       call.FilePath,
 				MessageOrdinal: message.Ordinal, CallIndex: callIndex,
 				ToolUseID: call.ToolUseID, ResultContentLength: call.ResultContentLength,
 				EventStatus:          status,
-				ResultContentUnknown: toolResultContentUnknown(call),
+				ResultContentUnknown: ToolResultContentUnknown(call),
 			})
 		}
 	}

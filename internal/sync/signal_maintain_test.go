@@ -191,155 +191,27 @@ func TestIncrementalMaintainerProceedsCurrentVersions(t *testing.T) {
 		"current versions with a matching revision must proceed")
 }
 
-func TestIncrementalMaintainerScansOnlyInsertedResultEvents(t *testing.T) {
-	const newContent = "new AKIA7QHWN2DKR4FYPLJM"
-	const oldContent = "old output that must not be rescanned"
-
-	m := newTestMaintainer("rev", secrets.DefiniteRulesVersion(), nil)
-	m.resultUpdates = []db.ToolCallResultUpdate{{
-		ToolUseID: "call_0",
-		Position:  db.ToolCallPosition{MessageOrdinal: 0, CallIndex: 0},
-	}}
-	state := signals.SeedIncrementalState(
-		[]signals.ToolCallRow{{
-			ToolName:       "exec_command",
-			Category:       "Bash",
-			InputJSON:      "{}",
-			ResultContent:  oldContent,
-			MessageOrdinal: 0,
-			CallIndex:      0,
-			EventStatus:    "completed",
-		}},
-		nil, "", "", nil, nil, 0, 0, 0,
-	)
-	blob, err := state.MarshalBinary()
-	require.NoError(t, err)
-	q := &fakeSignalQuery{
-		sess: &db.Session{
-			QualitySignalVersion: db.CurrentQualitySignalVersion,
-		},
-		state: db.SessionSignalState{
-			State:              blob,
-			TranscriptRevision: "rev",
-			SignalVersion:      db.CurrentQualitySignalVersion,
-		},
-		hasState: true,
-		revision: "rev",
-		callFacts: []db.ToolCallSignalFact{{
-			MessageOrdinal: 0,
-			CallIndex:      0,
-			ToolName:       "exec_command",
-			Category:       "Bash",
-			InputJSON:      "{}",
-			ResultContent:  newContent,
-			ToolUseID:      "call_0",
-			EventStatus:    "completed",
-		}},
-		callEvents: []db.ToolResultEvent{{
-			ToolUseID:     "call_0",
-			Source:        "function_call_output",
-			Content:       oldContent,
-			ContentLength: len(oldContent),
-			EventIndex:    0,
-		}},
-		inserted: map[db.ToolCallPosition][]db.ToolResultEvent{
-			{MessageOrdinal: 0, CallIndex: 0}: {{
-				ToolUseID:     "call_0",
-				Source:        "function_call_output",
-				Content:       newContent,
-				ContentLength: len(newContent),
-				EventIndex:    1,
-			}},
-		},
+func TestIncrementalMaintainerDeclinesToolObservationChanges(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		appended []db.Message
+		updates  []db.ToolCallResultUpdate
+	}{
+		{name: "appended_call", appended: []db.Message{{ToolCalls: []db.ToolCall{{ToolName: "Grep"}}}}},
+		{name: "late_result", updates: []db.ToolCallResultUpdate{{ToolUseID: "reused", Position: db.ToolCallPosition{MessageOrdinal: 2}}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestMaintainer("rev", secrets.DefiniteRulesVersion(), tt.appended)
+			m.resultUpdates = tt.updates
+			q := &fakeSignalQuery{}
+			before := SecretScanBytes()
+			delta, err := m.MaintainTx(t.Context(), q)
+			require.NoError(t, err)
+			assert.Nil(t, delta)
+			assert.Empty(t, q.requestedPositions)
+			assert.Equal(t, before, SecretScanBytes())
+		})
 	}
-
-	scanBytesBefore := SecretScanBytes()
-	delta, err := m.MaintainTx(t.Context(), q)
-	require.NoError(t, err)
-	require.NotNil(t, delta)
-	scanned := SecretScanBytes() - scanBytesBefore
-	assert.LessOrEqual(t, scanned, int64(len(newContent)),
-		"the maintainer must scan only the newly inserted result events")
-
-	var newEventFindings int
-	for _, finding := range delta.InsertFindings {
-		if finding.EventIndex != nil && *finding.EventIndex == 1 {
-			newEventFindings++
-		}
-	}
-	assert.Equal(t, 1, newEventFindings,
-		"the inserted event's finding must land with its real index")
-}
-
-func TestIncrementalMaintainerTargetsDuplicateCallIDOccurrence(t *testing.T) {
-	first := db.ToolCallPosition{MessageOrdinal: 0, CallIndex: 0}
-	second := db.ToolCallPosition{MessageOrdinal: 1, CallIndex: 0}
-	state := signals.SeedIncrementalState(
-		[]signals.ToolCallRow{
-			{
-				ToolName: "exec_command", Category: "Bash", InputJSON: `{}`,
-				ResultContent: "ok", MessageOrdinal: first.MessageOrdinal,
-				CallIndex: first.CallIndex,
-			},
-			{
-				ToolName: "exec_command", Category: "Bash", InputJSON: `{}`,
-				ResultContent: "ok", MessageOrdinal: second.MessageOrdinal,
-				CallIndex: second.CallIndex,
-			},
-		},
-		nil, "", "", nil, nil, 0, 0, 0,
-	)
-	blob, err := state.MarshalBinary()
-	require.NoError(t, err)
-
-	m := newTestMaintainer("rev", secrets.DefiniteRulesVersion(), nil)
-	m.resultUpdates = []db.ToolCallResultUpdate{{
-		ToolUseID: "reused-call",
-		Position:  second,
-	}}
-	q := &fakeSignalQuery{
-		sess: &db.Session{
-			QualitySignalVersion: db.CurrentQualitySignalVersion,
-		},
-		state: db.SessionSignalState{
-			State:              blob,
-			TranscriptRevision: "rev",
-			SignalVersion:      db.CurrentQualitySignalVersion,
-		},
-		hasState: true,
-		revision: "rev",
-		// Return both reused-ID facts in the opposite order. The maintainer
-		// must select by occurrence coordinates rather than whichever raw ID
-		// happens to win a map assignment.
-		callFacts: []db.ToolCallSignalFact{
-			{
-				MessageOrdinal: second.MessageOrdinal,
-				CallIndex:      second.CallIndex,
-				ToolName:       "exec_command",
-				Category:       "Bash",
-				InputJSON:      `{}`,
-				ResultContent:  "failed",
-				EventStatus:    "errored",
-				ToolUseID:      "reused-call",
-			},
-			{
-				MessageOrdinal: first.MessageOrdinal,
-				CallIndex:      first.CallIndex,
-				ToolName:       "exec_command",
-				Category:       "Bash",
-				InputJSON:      `{}`,
-				ResultContent:  "ok",
-				ToolUseID:      "reused-call",
-			},
-		},
-	}
-
-	delta, err := m.MaintainTx(t.Context(), q)
-	require.NoError(t, err)
-	require.NotNil(t, delta)
-	assert.Equal(t, []db.ToolCallPosition{second}, q.requestedPositions)
-	assert.Equal(t, 1, delta.Update.ToolFailureSignalCount,
-		"only the targeted reused-ID occurrence should become a failure")
 }
 
 // TestIncrementalMaintainerCompactionExplicitBoundaryParity pins parity
@@ -684,13 +556,9 @@ func TestIncrementalSignalMaintainerParityWithFullResync(t *testing.T) {
 	scanBytesBefore := SecretScanBytes()
 	require.Equal(t, 1, engine.SyncAll(t.Context(), nil).Synced)
 
-	// Delta gates: the maintained append must not load session history,
-	// and the secret scan must stay within the delta's own content.
-	assert.Equal(t, loadsBefore, database.MessagesLoadCount(),
-		"maintained delta must not call GetAllMessages")
-	assert.LessOrEqual(t, SecretScanBytes()-scanBytesBefore,
-		int64(len(appended)),
-		"secret scan bytes must not exceed the delta content")
+	assert.Equal(t, loadsBefore+1, database.MessagesLoadCount(), "tool changes use the existing full recompute")
+	assert.Greater(t, SecretScanBytes(), scanBytesBefore)
+	engine.FlushSignals()
 
 	sess, err := database.GetSessionFull(t.Context(), sessionID)
 	require.NoError(t, err)
@@ -709,6 +577,10 @@ func TestIncrementalSignalMaintainerParityWithFullResync(t *testing.T) {
 
 	assert.Equal(t, 1, sess.ToolFailureSignalCount, "failure detection reads the deduplicated event content")
 	incrementalSignals := snapshotSessionSignals(sess)
+	incrementalTools, err := database.GetAnalyticsTools(t.Context(), db.AnalyticsFilter{})
+	require.NoError(t, err)
+	require.Len(t, incrementalTools.ByTool, 1)
+	assert.Equal(t, 2, incrementalTools.ByTool[0].AnalyzedCalls)
 
 	// Authoritative rebuild: rewrite the file in place (same size),
 	// drop the checkpoint, and bump the mtime so the engine takes the
@@ -757,9 +629,11 @@ func TestIncrementalSignalMaintainerParityWithFullResync(t *testing.T) {
 		"incremental findings must match the authoritative full resync")
 	assert.Equal(t, incrementalSignals, snapshotSessionSignals(sess),
 		"incremental signals must match the authoritative full resync")
+	fullTools, err := database.GetAnalyticsTools(t.Context(), db.AnalyticsFilter{})
+	require.NoError(t, err)
+	assert.Equal(t, incrementalTools, fullTools, "tool rates must match after full resync")
 
-	// The full resync reseeds the state; a follow-up append must fold
-	// again without a decline.
+	// A late result after resync still refreshes the observations.
 	appended2 := testjsonl.JoinJSONL(testjsonl.CodexFunctionCallOutputJSON(
 		"call_1", "second result", "2024-01-01T10:00:06Z",
 	))
@@ -770,8 +644,9 @@ func TestIncrementalSignalMaintainerParityWithFullResync(t *testing.T) {
 	require.NoError(t, f.Close())
 	loadsBefore = database.MessagesLoadCount()
 	require.Equal(t, 1, engine.SyncAll(t.Context(), nil).Synced)
-	assert.Equal(t, loadsBefore, database.MessagesLoadCount(),
-		"post-resync append must fold incrementally")
+	engine.FlushSignals()
+	assert.Greater(t, database.MessagesLoadCount(), loadsBefore, "late results refresh the full observation snapshot")
+
 	sess, err = database.GetSessionFull(t.Context(), sessionID)
 	require.NoError(t, err)
 	require.Equal(t, db.CurrentQualitySignalVersion, sess.QualitySignalVersion)
@@ -779,9 +654,8 @@ func TestIncrementalSignalMaintainerParityWithFullResync(t *testing.T) {
 
 // TestIncrementalSignalMaintainerHandlesCommittedUsageUpdate proves the
 // real Codex late-output shape (function_call_output followed by token_count)
-// stays on the bounded delta path. The usage belongs to an assistant message
-// committed before the checkpoint, so maintenance must fold its token-derived
-// state without loading the historical transcript.
+// refreshes observations and usage together. The usage belongs to a message
+// committed before the checkpoint.
 func TestIncrementalSignalMaintainerHandlesCommittedUsageUpdate(t *testing.T) {
 	root := t.TempDir()
 	day := filepath.Join(root, "2024", "01", "01")
@@ -842,8 +716,8 @@ func TestIncrementalSignalMaintainerHandlesCommittedUsageUpdate(t *testing.T) {
 
 	loadsBefore := database.MessagesLoadCount()
 	require.Equal(t, 1, engine.SyncAll(t.Context(), nil).Synced)
-	require.Equal(t, loadsBefore, database.MessagesLoadCount(),
-		"late result plus committed usage must not load session history")
+	engine.FlushSignals()
+	require.Greater(t, database.MessagesLoadCount(), loadsBefore, "late results refresh observations and token-derived signals together")
 
 	sessionID := "codex:" + signalMaintainUUID
 	incrementalSession, err := database.GetSessionFull(t.Context(), sessionID)

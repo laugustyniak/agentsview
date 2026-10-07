@@ -11,6 +11,8 @@ The latest published release is
 
 **New features**
 
+- Tool Usage shows empty, repeat and recovery rates per tool, with links to the contributing sessions. Rates follow the project, date and model filters. Coverage identifies older sessions awaiting recomputation; a full resync populates them.
+
 - The web UI reports an anonymous `app_opened` event through the server when it
   loads and on the first focus of each later UTC day.
   `AGENTSVIEW_TELEMETRY_ENABLED=0` turns it off with the daemon ping.

@@ -75,6 +75,14 @@ func (e *Engine) newIncrementalSignalMaintainer(
 func (m *incrementalSignalMaintainer) MaintainTx(
 	ctx context.Context, q db.SignalQuery,
 ) (*db.SignalDelta, error) {
+	if len(m.resultUpdates) > 0 {
+		return nil, nil
+	}
+	for _, message := range m.appended {
+		if len(message.ToolCalls) > 0 {
+			return nil, nil
+		}
+	}
 	sess, err := q.Session(ctx)
 	if err != nil {
 		return nil, err
@@ -112,91 +120,7 @@ func (m *incrementalSignalMaintainer) MaintainTx(
 	// Appended tool-call rows in the same shape the full compute uses.
 	appendedRows := extractToolCallRows(m.appended)
 
-	// Modified facts for late result updates, resolved in-transaction so
-	// the fold sees the post-update stored facts.
-	modified := make(map[signals.CallPos]signals.ToolFact)
-	deleteKeys := make([]db.FindingDeleteKey, 0, len(m.resultUpdates))
 	var insertFindings []db.SecretFinding
-	positions := make([]db.ToolCallPosition, 0, len(m.resultUpdates))
-	for _, u := range m.resultUpdates {
-		if u.ToolUseID != "" {
-			positions = append(positions, u.Position)
-		}
-	}
-	callFacts, err := q.ToolCallsByPosition(ctx, positions)
-	if err != nil {
-		return nil, err
-	}
-	factByPosition := make(
-		map[db.ToolCallPosition]db.ToolCallSignalFact, len(callFacts),
-	)
-	for _, f := range callFacts {
-		factByPosition[db.ToolCallPosition{
-			MessageOrdinal: f.MessageOrdinal,
-			CallIndex:      f.CallIndex,
-		}] = f
-	}
-	for _, u := range m.resultUpdates {
-		fact, ok := factByPosition[u.Position]
-		if !ok {
-			continue // update targeted nothing stored
-		}
-		row := signals.ToolCallRow{
-			ToolName:       fact.ToolName,
-			Category:       fact.Category,
-			InputJSON:      fact.InputJSON,
-			ResultContent:  fact.ResultContent,
-			MessageOrdinal: fact.MessageOrdinal,
-			CallIndex:      fact.CallIndex,
-			EventStatus:    fact.EventStatus,
-		}
-		f := signals.ToolFact{
-			MessageOrdinal: fact.MessageOrdinal,
-			CallIndex:      fact.CallIndex,
-			Failure:        signals.IsFailure(row),
-			ExactSignature: signals.ExactToolSignature(row),
-			CommandClass:   signals.CommandClass(row),
-		}
-		modified[f.CallPos] = f
-
-		// Only the events this transaction inserted need scanning:
-		// previously stored events already carry findings, and rescanning
-		// the call's whole history makes repeated late outputs quadratic.
-		// When any event exists the full compute scans events instead of
-		// the result_content summary, so the summary-derived finding must
-		// go and the inserted events are scanned with their real indexes.
-		events := q.InsertedResultEvents(u.Position)
-		if len(events) == 0 {
-			continue
-		}
-		deleteKeys = append(deleteKeys, db.FindingDeleteKey{
-			MessageOrdinal: fact.MessageOrdinal,
-			CallIndex:      fact.CallIndex,
-			LocationKind:   "tool_result",
-		})
-		for _, ev := range events {
-			secretScanBytes.Add(int64(len(ev.Content)))
-			matches := secrets.ScanDefinite(ev.Content)
-			for _, match := range matches {
-				callIdx := fact.CallIndex
-				evIdx := ev.EventIndex
-				insertFindings = append(insertFindings, db.SecretFinding{
-					SessionID:      m.sessionID,
-					RuleName:       match.Rule,
-					Confidence:     match.Confidence,
-					LocationKind:   "tool_result_event",
-					MessageOrdinal: fact.MessageOrdinal,
-					CallIndex:      &callIdx,
-					EventIndex:     &evIdx,
-					MatchStart:     match.Start,
-					MatchEnd:       match.End,
-					MatchIndex:     match.Index,
-					RedactedMatch:  match.Redacted,
-					RulesVersion:   secrets.DefiniteRulesVersion(),
-				})
-			}
-		}
-	}
 
 	// Appended message content: scan exactly the stored rows.
 	newFindings, _ := scanSecretsFromMessages(
@@ -210,7 +134,7 @@ func (m *incrementalSignalMaintainer) MaintainTx(
 		EditChurnCount: sess.EditChurnCount,
 	}
 	nextState, toolHealth, ok := state.FoldToolHealth(
-		appendedRows, modified, row,
+		appendedRows, nil, row,
 	)
 	if !ok {
 		return nil, nil // out-of-window modification: reseed
@@ -395,9 +319,8 @@ func (m *incrementalSignalMaintainer) MaintainTx(
 	}
 
 	return &db.SignalDelta{
-		Update:            update,
-		InsertFindings:    insertFindings,
-		DeleteFindingKeys: deleteKeys,
+		Update:         update,
+		InsertFindings: insertFindings,
 		State: &db.SessionSignalState{
 			SessionID:          m.sessionID,
 			State:              blob,

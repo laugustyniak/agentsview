@@ -1,0 +1,197 @@
+package db
+
+import (
+	"database/sql"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/agentsview/internal/config"
+)
+
+func seedToolRateFixture(t *testing.T, d *DB) {
+	t.Helper()
+	for _, id := range []string{"recovered", "abandoned", "open", "unknown", "legacy"} {
+		insertSession(t, d, id, "project-a", func(s *Session) { s.StartedAt = new("2025-06-01T23:59:00Z"); s.UserMessageCount = 2 })
+	}
+	call := func(sid string, ordinal int, timestamp, tool, model string) Message {
+		m := asstMsgAt(sid, ordinal, "tool", timestamp)
+		m.Model = model
+		m.ToolCalls = []ToolCall{{SessionID: sid, ToolName: tool, Category: tool}}
+		return m
+	}
+	insertMessages(t, d,
+		call("recovered", 2, "2025-06-01T23:59:00Z", "Grep", "model-a"),
+		call("recovered", 4, "2025-06-02T00:01:00Z", "Grep", "model-b"),
+		call("recovered", 5, "2025-06-02T00:02:00Z", "Read", "model-b"),
+		call("abandoned", 0, "2025-06-02T01:00:00Z", "Grep", "model-b"),
+		call("open", 0, "2025-06-02T02:00:00Z", "Grep", "model-b"),
+		call("unknown", 0, "2025-06-02T03:00:00Z", "Grep", "model-b"),
+		call("unknown", 1, "2025-06-02T03:01:00Z", "Grep", "model-b"),
+		call("legacy", 0, "2025-06-02T04:00:00Z", "Grep", "model-b"),
+	)
+	facts := map[string][]ToolObservation{
+		"recovered": {{MessageOrdinal: 2, Outcome: "empty", Repeat: "none", SequenceEnding: new("recovered")}, {MessageOrdinal: 4, Outcome: "empty", Repeat: "identical"}, {MessageOrdinal: 5, Outcome: "content", Repeat: "none"}},
+		"abandoned": {{Outcome: "empty", Repeat: "none", SequenceEnding: new("abandoned")}},
+		"open":      {{Outcome: "empty", Repeat: "none", SequenceEnding: new("open")}},
+		"unknown":   {{Outcome: "empty", Repeat: "none", SequenceEnding: new("unknown")}, {MessageOrdinal: 1, Outcome: "unknown", Repeat: "near_identical"}},
+	}
+	for id, observations := range facts {
+		updateSignals(t, d, id, SessionSignalUpdate{ToolObservations: observations, QualitySignals: QualitySignals{Version: CurrentQualitySignalVersion}})
+	}
+}
+
+func TestToolEffectivenessFilteredRatesAndEvidence(t *testing.T) {
+	d := testDB(t)
+	seedToolRateFixture(t, d)
+	for _, tc := range []struct {
+		name                                                                         string
+		filter                                                                       AnalyticsFilter
+		calls, analyzed, known, empty, repeated, recovered, abandoned, open, unknown int
+	}{
+		{"all", AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC"}, 7, 6, 5, 5, 2, 1, 1, 1, 1},
+		{"second_day", AnalyticsFilter{From: "2025-06-02", To: "2025-06-02", Timezone: "UTC"}, 6, 5, 4, 4, 2, 0, 1, 1, 1},
+		{"first_model", AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC", Model: "model-a"}, 1, 1, 1, 1, 0, 1, 0, 0, 0},
+		{"second_model", AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC", Model: "model-b"}, 6, 5, 4, 4, 2, 0, 1, 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response, err := d.GetAnalyticsTools(t.Context(), tc.filter)
+			require.NoError(t, err)
+			var tool ToolUsageAnalysis
+			for _, row := range response.ByTool {
+				if row.ToolName == "Grep" {
+					tool = row
+				}
+			}
+			assert.Equal(t, tc.calls, tool.CallCount)
+			assert.Equal(t, tc.calls-tc.analyzed, tool.MissingCalls)
+			assert.Equal(t, ToolEffectivenessCounts{AnalyzedCalls: tc.analyzed, KnownOutcomeCalls: tc.known, EmptyCalls: tc.empty, RepeatedCalls: tc.repeated, RecoveredSequences: tc.recovered, AbandonedSequences: tc.abandoned, OpenSequences: tc.open, UnknownSequences: tc.unknown}, tool.ToolEffectivenessCounts)
+			require.NotNil(t, tool.EmptyRate)
+			assert.InDelta(t, float64(tc.empty)/float64(tc.known), *tool.EmptyRate, 0)
+			require.NotNil(t, tool.RepeatRate)
+			assert.InDelta(t, float64(tc.repeated)/float64(tc.analyzed), *tool.RepeatRate, 0)
+			require.NotNil(t, tool.RecoveryRate)
+			assert.InDelta(t, float64(tc.recovered)/float64(tc.recovered+tc.abandoned), *tool.RecoveryRate, 0)
+		})
+	}
+	f := AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC", ToolName: "Grep"}
+	first, err := d.GetAnalyticsSignalSessions(t.Context(), f, "tool_recovery_rate", 1)
+	require.NoError(t, err)
+	assert.Equal(t, 2, first.Total)
+	require.Len(t, first.Sessions, 1)
+	require.NotNil(t, first.NextOffset)
+	f.EvidenceOffset = *first.NextOffset
+	second, err := d.GetAnalyticsSignalSessions(t.Context(), f, "tool_recovery_rate", 1)
+	require.NoError(t, err)
+	require.Len(t, second.Sessions, 1)
+	assert.NotEqual(t, first.Sessions[0].SessionID, second.Sessions[0].SessionID)
+	assert.Nil(t, second.NextOffset)
+	f.EvidenceOffset = 0
+	f.Model = "model-b"
+	evidence, err := d.GetAnalyticsSignalSessions(t.Context(), f, "tool_recovery_rate", 20)
+	require.NoError(t, err)
+	require.Len(t, evidence.Sessions, 1)
+	assert.Equal(t, "abandoned", evidence.Sessions[0].SessionID)
+	f.ToolName = "Read"
+	evidence, err = d.GetAnalyticsSignalSessions(t.Context(), f, "tool_recovery_rate", 20)
+	require.NoError(t, err)
+	assert.Empty(t, evidence.Sessions)
+}
+
+func TestToolEffectivenessMissingAndUnknownDenominators(t *testing.T) {
+	d := testDB(t)
+	insertSession(t, d, "unknown", "project-a")
+	m := asstMsgAt("unknown", 0, "tool", "2025-06-02T00:00:00Z")
+	m.ToolCalls = []ToolCall{{SessionID: "unknown", ToolName: "Grep", Category: "Grep"}}
+	insertMessages(t, d, m)
+	f := AnalyticsFilter{From: "2025-06-02", To: "2025-06-02", Timezone: "UTC"}
+	response, err := d.GetAnalyticsTools(t.Context(), f)
+	require.NoError(t, err)
+	require.Len(t, response.ByTool, 1)
+	row := response.ByTool[0]
+	assert.Equal(t, 1, row.MissingCalls)
+	assert.Nil(t, row.EmptyRate)
+	assert.Nil(t, row.RepeatRate)
+	assert.Nil(t, row.RecoveryRate)
+	updateSignals(t, d, "unknown", SessionSignalUpdate{ToolObservations: []ToolObservation{{Outcome: "unknown", Repeat: "none"}}, QualitySignals: QualitySignals{Version: CurrentQualitySignalVersion}})
+	response, err = d.GetAnalyticsTools(t.Context(), f)
+	require.NoError(t, err)
+	row = response.ByTool[0]
+	assert.Zero(t, row.MissingCalls)
+	assert.Nil(t, row.EmptyRate)
+	require.NotNil(t, row.RepeatRate)
+	assert.Zero(t, *row.RepeatRate)
+	assert.Nil(t, row.RecoveryRate)
+	require.NoError(t, d.Update(t.Context(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE sessions SET quality_signal_version=0 WHERE id='unknown'`)
+		return err
+	}))
+	response, err = d.GetAnalyticsTools(t.Context(), f)
+	require.NoError(t, err)
+	assert.Equal(t, 1, response.ByTool[0].MissingCalls)
+	evidence, err := d.GetAnalyticsSignalSessions(t.Context(), f, "tool_repeat_rate", 10)
+	require.NoError(t, err)
+	assert.Empty(t, evidence.Sessions)
+}
+
+func TestToolObservationsReplacementFingerprintAndOrphanCopy(t *testing.T) {
+	d := testDB(t)
+	seedToolRateFixture(t, d)
+	before, err := d.ToolCallFingerprint(t.Context(), "recovered")
+	require.NoError(t, err)
+	parseBefore, err := d.ToolCallParseDiffFingerprint(t.Context(), "recovered")
+	require.NoError(t, err)
+	updateSignals(t, d, "recovered", SessionSignalUpdate{QualitySignals: QualitySignals{Version: CurrentQualitySignalVersion}})
+	after, err := d.ToolCallFingerprint(t.Context(), "recovered")
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+	f := AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC"}
+	want, err := d.GetAnalyticsTools(t.Context(), f)
+	require.NoError(t, err)
+	replacement := testDB(t)
+	ids, err := replacement.CopyOrphanedDataFromExcluding(d.Path(), nil)
+	require.NoError(t, err)
+	assert.Len(t, ids, 5)
+	copied, err := replacement.GetAnalyticsTools(t.Context(), f)
+	require.NoError(t, err)
+	assert.Equal(t, want, copied)
+	updateSignals(t, d, "recovered", SessionSignalUpdate{ToolObservations: []ToolObservation{}, QualitySignals: QualitySignals{Version: CurrentQualitySignalVersion}})
+	after, err = d.ToolCallFingerprint(t.Context(), "recovered")
+	require.NoError(t, err)
+	assert.NotEqual(t, before, after)
+	batch, err := d.ToolCallFingerprints(t.Context(), []string{"recovered"})
+	require.NoError(t, err)
+	assert.Equal(t, after, batch["recovered"])
+	parseAfter, err := d.ToolCallParseDiffFingerprint(t.Context(), "recovered")
+	require.NoError(t, err)
+	assert.Equal(t, parseBefore, parseAfter)
+}
+
+func TestToolObservationRecomputeRejectsChangedTermination(t *testing.T) {
+	d := testDB(t)
+	seedToolRateFixture(t, d)
+	session, err := d.GetSessionFull(t.Context(), "abandoned")
+	require.NoError(t, err)
+	snapshot, err := SignalInputSnapshot(*session)
+	require.NoError(t, err)
+	require.NoError(t, d.Update(t.Context(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE sessions SET termination_status='clean' WHERE id='abandoned'`)
+		return err
+	}))
+	published, err := d.ReplaceSessionSignalsIfInputsMatch(t.Context(), "abandoned", snapshot, nil, SessionSignalUpdate{ToolObservations: []ToolObservation{{Outcome: "unknown", Repeat: "none"}}}, SessionSignalState{})
+	require.NoError(t, err)
+	assert.False(t, published)
+	messages, err := d.GetAllMessages(t.Context(), "abandoned")
+	require.NoError(t, err)
+	assert.Equal(t, new("empty"), messages[0].ToolCalls[0].ObservedOutcome)
+}
+
+func TestToolObservationsClearWhenArchiveOmitsEvidence(t *testing.T) {
+	d := testDB(t)
+	seedToolRateFixture(t, d)
+	d.SetArchiveContent(config.ArchiveContentTranscripts)
+	updateSignals(t, d, "recovered", SessionSignalUpdate{ToolObservations: []ToolObservation{{MessageOrdinal: 2, Outcome: "empty", Repeat: "none", SequenceEnding: new("recovered")}}, QualitySignals: QualitySignals{Version: CurrentQualitySignalVersion}})
+	messages, err := d.GetAllMessages(t.Context(), "recovered")
+	require.NoError(t, err)
+	assert.Nil(t, messages[0].ToolCalls[0].ObservedOutcome)
+}

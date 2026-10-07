@@ -14,6 +14,7 @@ type SessionSignalUpdate struct {
 	// FullState is optional state computed from the complete message snapshot
 	// being published. The same transaction binds it to the stored revision.
 	// Incremental and asynchronous writers use their own snapshot guards.
+	ToolObservations       []ToolObservation
 	FullState              *SessionSignalState
 	ToolFailureSignalCount int
 	ToolRetryCount         int
@@ -34,6 +35,15 @@ type SessionSignalUpdate struct {
 	SecretLeakCount        int
 	SecretsRulesVersion    string
 	QualitySignals         QualitySignals
+}
+
+// ToolObservation addresses derived facts by stable transcript coordinates.
+type ToolObservation struct {
+	MessageOrdinal int
+	CallIndex      int
+	Outcome        string
+	Repeat         string
+	SequenceEnding *string
 }
 
 // usageOnlySignalUpdate is the canonical derived-signal state for an archive
@@ -107,6 +117,9 @@ func (db *DB) UpdateSessionSignals(ctx context.Context,
 	if db.usageOnlyStorage() {
 		err = settleUsageOnlySignalsTx(tx, sessionID)
 	} else {
+		if db.ArchiveContent().OmitsToolContent() {
+			u.ToolObservations = []ToolObservation{}
+		}
 		err = updateSessionSignalsTx(tx, sessionID, u)
 	}
 	if err != nil {
@@ -184,6 +197,16 @@ func updateSessionSignalsTx(
 			"updating session signals for %s: %w",
 			sessionID, err,
 		)
+	}
+	if u.ToolObservations != nil {
+		if _, err := tx.Exec(`UPDATE tool_calls SET observed_outcome = NULL, observed_repeat = NULL, sequence_ending = NULL WHERE session_id = ?`, sessionID); err != nil {
+			return err
+		}
+		for _, fact := range u.ToolObservations {
+			if _, err := tx.Exec(`UPDATE tool_calls SET observed_outcome = ?, observed_repeat = ?, sequence_ending = ? WHERE session_id = ? AND call_index = ? AND message_id = (SELECT id FROM messages WHERE session_id = ? AND ordinal = ?)`, fact.Outcome, fact.Repeat, fact.SequenceEnding, sessionID, fact.CallIndex, sessionID, fact.MessageOrdinal); err != nil {
+				return fmt.Errorf("updating tool observations: %w", err)
+			}
+		}
 	}
 	if u.FullState != nil {
 		state := u.FullState
@@ -379,4 +402,21 @@ func (db *DB) MarkSignalsBackfillDone(ctx context.Context) error {
 		)
 	}
 	return nil
+}
+
+// ApplyToolObservations carries prepared observations into an existing mirror writer.
+func ApplyToolObservations(messages []Message, observations []ToolObservation) {
+	byOrdinal := make(map[int]int, len(messages))
+	for i, message := range messages {
+		byOrdinal[message.Ordinal] = i
+	}
+	for _, fact := range observations {
+		i, ok := byOrdinal[fact.MessageOrdinal]
+		if !ok || fact.CallIndex < 0 || fact.CallIndex >= len(messages[i].ToolCalls) {
+			continue
+		}
+		call := &messages[i].ToolCalls[fact.CallIndex]
+		outcome, repeat := fact.Outcome, fact.Repeat
+		call.ObservedOutcome, call.ObservedRepeat, call.SequenceEnding = &outcome, &repeat, fact.SequenceEnding
+	}
 }

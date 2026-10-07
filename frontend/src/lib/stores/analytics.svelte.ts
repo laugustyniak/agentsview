@@ -473,6 +473,10 @@ class AnalyticsStore {
     return p;
   }
 
+  toolEvidenceParams(): AnalyticsParams {
+    return this.filterParams();
+  }
+
   signalEvidenceParams(): AnalyticsParams {
     // Quality-only drilldown: omit the Analytics model filter so signal
     // evidence matches the unscoped Quality signal facts (the Quality page

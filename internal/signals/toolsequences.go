@@ -158,6 +158,9 @@ func classifyToolOutcome(call ToolCallRow) ToolOutcome {
 		return ToolOutcomeUnknown
 	}
 
+	if call.ContentOutcome != "" {
+		return call.ContentOutcome
+	}
 	if call.ResultContentUnknown {
 		return ToolOutcomeUnknown
 	}

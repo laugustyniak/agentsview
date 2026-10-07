@@ -186,7 +186,22 @@ Three histograms showing the distribution of:
 
 Total tool call count with breakdowns by category (Read, Edit, Write, Bash,
 Search, Web, Task) and by agent. Includes a trend chart showing tool usage over
-time.
+time. Each tool also shows empty, repeat and recovery rates. Click a rate to
+open the sessions included in its denominator.
+
+Empty rate divides empty results by calls with known outcomes. Repeat rate
+divides identical or near-identical follow-ups by analyzed calls. Recovery rate
+divides recovered sequences by recovered plus abandoned sequences. A sequence
+starts with an empty result or error; recovery means a later call returned
+content. The starting tool owns the sequence. Open and unknown endings stay
+outside the recovery denominator. A missing denominator shows Unavailable.
+
+Project, date and model filters select individual calls. Coverage shows
+analyzed calls divided by all calls. Older sessions stay uncomputed until their
+normal signal refresh; a full `agentsview sync --full` populates them. Pending
+refreshes have missing coverage until the recompute commits. PostgreSQL,
+DuckDB and ClickHouse receive these observations through their normal pushes.
+Archives that omit tool content report missing coverage.
 
 ![Tool usage](/docs/assets/generated/screenshots/tool-usage.png)
 

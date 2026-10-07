@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/agentsview/internal/db"
+	"go.kenn.io/agentsview/internal/ingest"
 	"go.kenn.io/agentsview/internal/storage"
 )
 
@@ -169,11 +170,11 @@ func TestAnalyticsToolsSkillsSQLiteParity(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 9, tools.TotalCalls)
 		assert.Equal(t, []db.ToolUsageAnalysis{
-			{ToolName: "Read", Category: "Read", CallCount: 5, SessionCount: 3, Pct: 55.6},
-			{ToolName: "Bash", Category: "Bash", CallCount: 1, SessionCount: 1, Pct: 11.1},
-			{ToolName: "Edit", Category: "Edit", CallCount: 1, SessionCount: 1, Pct: 11.1},
-			{ToolName: "Grep", Category: "Grep", CallCount: 1, SessionCount: 1, Pct: 11.1},
-			{ToolName: "Unknown", Category: "Other", CallCount: 1, SessionCount: 1, Pct: 11.1},
+			{ToolName: "Read", Category: "Read", CallCount: 5, SessionCount: 3, Pct: 55.6, MissingCalls: 5},
+			{ToolName: "Bash", Category: "Bash", CallCount: 1, SessionCount: 1, Pct: 11.1, MissingCalls: 1},
+			{ToolName: "Edit", Category: "Edit", CallCount: 1, SessionCount: 1, Pct: 11.1, MissingCalls: 1},
+			{ToolName: "Grep", Category: "Grep", CallCount: 1, SessionCount: 1, Pct: 11.1, MissingCalls: 1},
+			{ToolName: "Unknown", Category: "Other", CallCount: 1, SessionCount: 1, Pct: 11.1, MissingCalls: 1},
 		}, tools.ByTool)
 		assert.Equal(t, []db.ToolTrendEntry{
 			{Date: "2024-03-04", ByCat: map[string]int{"Read": 3, "Bash": 1, "Other": 1, "Grep": 1}},
@@ -248,7 +249,7 @@ func TestAnalyticsToolsSkillsSQLiteParity(t *testing.T) {
 		tools, err = remote.GetAnalyticsTools(t.Context(), f)
 		require.NoError(t, err)
 		assert.Equal(t, []db.ToolUsageAnalysis{
-			{ToolName: "Unknown", Category: "Other", CallCount: 1, SessionCount: 1, Pct: 100},
+			{ToolName: "Unknown", Category: "Other", CallCount: 1, SessionCount: 1, Pct: 100, MissingCalls: 1},
 		}, tools.ByTool, "07:30Z is 03:30 EDT after the spring-forward jump")
 	})
 }
@@ -389,4 +390,109 @@ func seedToolsSkillsParityFixture(t *testing.T, local *db.DB) {
 			"seed messages %s", s.id)
 	}
 	require.NoError(t, local.SoftDeleteSession(t.Context(), "deleted"))
+}
+
+func TestToolEffectivenessSQLitePGParity(t *testing.T) {
+	const schema = "agentsview_tool_rates_parity_test"
+	url := testPGURL(t)
+	cleanNamedPGSchema(t, url, schema)
+	t.Cleanup(func() { cleanNamedPGSchema(t, url, schema) })
+	local := testDB(t)
+	call := func(id string, ordinal int, ts, tool, model, input, result string) db.Message {
+		return db.Message{SessionID: id, Ordinal: ordinal, Timestamp: ts, Role: "assistant", Model: model, HasToolUse: true, ToolCalls: []db.ToolCall{{SessionID: id, ToolName: tool, Category: tool, InputJSON: input, ResultContent: result}}}
+	}
+	cases := []struct {
+		id       string
+		status   *string
+		messages []db.Message
+	}{
+		{"recovered", new("clean"), []db.Message{call("recovered", 2, "2025-06-01T23:59:00Z", "Grep", "model-a", `{"pattern":"alpha"}`, "No matches found"), call("recovered", 4, "2025-06-02T00:01:00Z", "Grep", "model-b", `{"pattern":"alpha"}`, "No matches found"), call("recovered", 5, "2025-06-02T00:02:00Z", "Read", "model-b", `{}`, "content")}},
+		{"abandoned", new("clean"), []db.Message{call("abandoned", 0, "2025-06-02T01:00:00Z", "Grep", "model-b", `{}`, "No matches found")}},
+		{"open", nil, []db.Message{call("open", 0, "2025-06-02T02:00:00Z", "Grep", "model-b", `{}`, "No matches found")}},
+		{"unknown", new("clean"), []db.Message{call("unknown", 0, "2025-06-02T03:00:00Z", "Grep", "model-b", `{"pattern":"alpha"}`, "No matches found"), call("unknown", 1, "2025-06-02T03:01:00Z", "Grep", "model-b", `{ "pattern": "alpha" }`, "[image]")}},
+		{"legacy", nil, []db.Message{call("legacy", 0, "2025-06-02T04:00:00Z", "Grep", "model-b", `{}`, "content")}},
+	}
+	for _, fixture := range cases {
+		session := db.Session{ID: fixture.id, Project: "project-a", Agent: "claude", Machine: "fixture", StartedAt: new("2025-06-01T23:59:00Z"), TerminationStatus: fixture.status, MessageCount: len(fixture.messages), UserMessageCount: 2}
+		require.NoError(t, local.UpsertSession(t.Context(), session))
+		if fixture.id == "legacy" {
+			require.NoError(t, local.InsertMessages(t.Context(), fixture.messages))
+			continue
+		}
+		update, findings := ingest.ComputeSignalsAndSecrets(session, fixture.messages)
+		require.NoError(t, local.ReplaceSessionContent(t.Context(), fixture.id, fixture.messages, update, findings))
+	}
+	syncer, err := New(url, schema, local, "fixture", true, storage.PusherOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, syncer.Close()) })
+	_, err = syncer.Push(t.Context(), false, nil)
+	require.NoError(t, err)
+	remote, err := NewStore(url, schema, true)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, remote.Close()) })
+	for _, f := range []db.AnalyticsFilter{
+		{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC", Project: "project-a"},
+		{From: "2025-06-02", To: "2025-06-02", Timezone: "UTC", Project: "project-a"},
+		{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC", Model: "model-a"},
+		{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC", Model: "model-b"},
+	} {
+		want, err := local.GetAnalyticsTools(t.Context(), f)
+		require.NoError(t, err)
+		got, err := remote.GetAnalyticsTools(t.Context(), f)
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+		f.ToolName = "Grep"
+		for _, metric := range []string{"tool_empty_rate", "tool_repeat_rate", "tool_recovery_rate"} {
+			first, err := local.GetAnalyticsSignalSessions(t.Context(), f, metric, 1)
+			require.NoError(t, err)
+			actual, err := remote.GetAnalyticsSignalSessions(t.Context(), f, metric, 1)
+			require.NoError(t, err)
+			assert.Equal(t, first, actual)
+			if first.NextOffset != nil {
+				f.EvidenceOffset = *first.NextOffset
+				second, err := local.GetAnalyticsSignalSessions(t.Context(), f, metric, 1)
+				require.NoError(t, err)
+				actual, err = remote.GetAnalyticsSignalSessions(t.Context(), f, metric, 1)
+				require.NoError(t, err)
+				assert.Equal(t, second, actual)
+				f.EvidenceOffset = 0
+			}
+		}
+	}
+	f := db.AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC"}
+	rates, err := remote.GetAnalyticsTools(t.Context(), f)
+	require.NoError(t, err)
+	require.Len(t, rates.ByTool, 2)
+	grep := rates.ByTool[0]
+	assert.Equal(t, 7, grep.CallCount)
+	assert.Equal(t, 1, grep.MissingCalls)
+	assert.Equal(t, 5, grep.EmptyCalls)
+	assert.Equal(t, 5, grep.KnownOutcomeCalls)
+	assert.Equal(t, 2, grep.RepeatedCalls)
+	assert.Equal(t, 1, grep.RecoveredSequences)
+	assert.Equal(t, 1, grep.AbandonedSequences)
+	assert.Equal(t, 1, grep.OpenSequences)
+	assert.Equal(t, 1, grep.UnknownSequences)
+	require.NotNil(t, grep.RecoveryRate)
+	assert.Equal(t, 0.5, *grep.RecoveryRate)
+	session, err := local.GetSessionFull(t.Context(), "abandoned")
+	require.NoError(t, err)
+	messages, err := local.GetAllMessages(t.Context(), "abandoned")
+	require.NoError(t, err)
+	revision := session.TranscriptRevision
+	session.TerminationStatus = nil
+	update := ingest.ComputeSignalsFromMessages(*session, messages)
+	require.NoError(t, local.UpdateSessionSignals(t.Context(), "abandoned", update))
+	after, err := local.GetSessionFull(t.Context(), "abandoned")
+	require.NoError(t, err)
+	assert.Equal(t, revision, after.TranscriptRevision)
+	_, err = syncer.Push(t.Context(), false, nil)
+	require.NoError(t, err)
+	want, err := local.GetAnalyticsTools(t.Context(), f)
+	require.NoError(t, err)
+	got, err := remote.GetAnalyticsTools(t.Context(), f)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	require.NotNil(t, got.ByTool[0].RecoveryRate)
+	assert.Equal(t, 1.0, *got.ByTool[0].RecoveryRate)
 }

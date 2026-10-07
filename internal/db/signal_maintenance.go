@@ -70,6 +70,7 @@ type SessionSignalInputSnapshot struct {
 	HasEndedAt           bool
 	PeakContextTokens    int
 	HasPeakContextTokens bool
+	TerminationStatus    string
 }
 
 // SignalInputSnapshot returns the signal-driving session-row inputs from s.
@@ -89,6 +90,9 @@ func SignalInputSnapshot(s Session) (SessionSignalInputSnapshot, error) {
 	if s.EndedAt != nil {
 		snapshot.EndedAt = *s.EndedAt
 		snapshot.HasEndedAt = true
+	}
+	if s.TerminationStatus != nil {
+		snapshot.TerminationStatus = *s.TerminationStatus
 	}
 	return snapshot, nil
 }
@@ -551,6 +555,9 @@ func (db *DB) ReplaceSessionSignalsIfInputsMatch(ctx context.Context,
 	); err != nil {
 		return false, err
 	}
+	if db.ArchiveContent().OmitsToolContent() {
+		update.ToolObservations = []ToolObservation{}
+	}
 	if err := updateSessionSignalsTx(tx, sessionID, update); err != nil {
 		return false, err
 	}
@@ -604,16 +611,17 @@ func sessionSignalInputSnapshotMatchesTx(ctx context.Context,
 		messageCount    int
 		isAutomated     int
 		endedAt         sql.NullString
+		termination     sql.NullString
 		peakTokens      int
 		hasPeak         int
 	)
 	err := tx.QueryRowContext(ctx, `
 		SELECT transcript_revision, message_count, is_automated, ended_at,
-		       peak_context_tokens, has_peak_context_tokens
+		       peak_context_tokens, has_peak_context_tokens, termination_status
 		FROM sessions WHERE id = ?`, sessionID,
 	).Scan(
 		&currentRevision, &messageCount, &isAutomated, &endedAt,
-		&peakTokens, &hasPeak,
+		&peakTokens, &hasPeak, &termination,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -624,6 +632,7 @@ func sessionSignalInputSnapshotMatchesTx(ctx context.Context,
 		)
 	}
 	current := SessionSignalInputSnapshot{
+		TerminationStatus:    termination.String,
 		TranscriptRevision:   currentRevision,
 		MessageCount:         messageCount,
 		IsAutomated:          isAutomated != 0,

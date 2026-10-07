@@ -76,6 +76,8 @@ type analyticsTopSessionsInput struct {
 }
 
 type analyticsSignalSessionsInput struct {
+	ToolName string `query:"tool_name" doc:"Tool name for a tool rate"`
+	Offset   int    `query:"offset" minimum:"0" default:"0" doc:"Session evidence offset"`
 	AnalyticsFilterInput
 	Signal string `query:"signal" required:"true" doc:"Signal name"`
 	Limit  int    `query:"limit" minimum:"0" maximum:"20" default:"10" doc:"Maximum number of session examples"`
@@ -296,6 +298,7 @@ func (s *Server) humaAnalyticsSignalSessions(
 	if err != nil {
 		return nil, err
 	}
+	f.ToolName, f.EvidenceOffset = in.ToolName, in.Offset
 	result, err := s.db.GetAnalyticsSignalSessions(
 		ctx, f, in.Signal, in.Limit,
 	)

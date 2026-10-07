@@ -17,6 +17,7 @@ import (
 
 	"go.kenn.io/agentsview/internal/config"
 	"go.kenn.io/agentsview/internal/db"
+	"go.kenn.io/agentsview/internal/ingest"
 	"go.kenn.io/agentsview/internal/parser"
 	"go.kenn.io/agentsview/internal/secrets"
 	"go.kenn.io/agentsview/internal/signals"
@@ -76,7 +77,10 @@ type codexStagingSink struct {
 	// contentFailures records per-call content-failure verdicts captured
 	// during ingestion for sole events or publication for multi-event
 	// summaries, so the engine can reuse them in the signal pass.
-	contentFailures map[string]bool
+	contentOutcomes   map[string]string
+	toolNameByCallKey map[string]string
+	statusByCallKey   map[string]string
+	contentFailures   map[string]bool
 	// stageErr is the sticky first scratch failure. Once set, staging is
 	// unrecoverable for this parse: events are no longer accepted and the
 	// publish must fail, so a disk-full or I/O error can never commit a
@@ -444,6 +448,10 @@ func (s *codexStagingSink) AppendMessage(m parser.ParsedMessage) int {
 			CallIndex:      callIndex,
 		}] = stageKey
 		s.categoryByCallKey[stageKey] = tc.Category
+		if s.toolNameByCallKey == nil {
+			s.toolNameByCallKey = make(map[string]string)
+		}
+		s.toolNameByCallKey[stageKey] = tc.ToolName
 	}
 	return ordinal
 }
@@ -589,6 +597,10 @@ func (s *codexStagingSink) AppendToolResultEvent(ctx context.Context,
 	if blanked != 0 {
 		storedContent = ""
 	}
+	if s.statusByCallKey == nil {
+		s.statusByCallKey = make(map[string]string)
+	}
+	s.statusByCallKey[stageKey] = ev.Status
 	eventIndex := int(s.eventByCallKey[stageKey])
 	s.eventByCallKey[stageKey]++
 	s.addEventFindings(stageKey, eventIndex, storedContent)
@@ -601,6 +613,7 @@ func (s *codexStagingSink) AppendToolResultEvent(ctx context.Context,
 			summary = ""
 		}
 		s.singleSummaryLengths[stageKey] = len(summary)
+		s.recordContentOutcome(stageKey, summary, ev.Status)
 		if !s.disableSignals {
 			if s.contentFailures == nil {
 				s.contentFailures = make(map[string]bool)
@@ -612,6 +625,7 @@ func (s *codexStagingSink) AppendToolResultEvent(ctx context.Context,
 	} else {
 		delete(s.singleSummaryLengths, stageKey)
 		delete(s.contentFailures, stageKey)
+		delete(s.contentOutcomes, stageKey)
 	}
 
 	// The in-memory model keeps a unique placeholder instead of the
@@ -685,12 +699,14 @@ func (s *codexStagingSink) PublishToolResultImages(ctx context.Context) error {
 
 	s.singleSummaryLengths = make(map[string]int)
 	s.contentFailures = make(map[string]bool)
+	s.contentOutcomes = make(map[string]string)
 	s.findings = nil
 	s.findingPos = nil
 	s.eventByCallKey = make(map[string]int64)
 	type singleSummaryCandidate struct {
 		length  int
 		failure bool
+		outcome string
 	}
 	candidates := make(map[string]singleSummaryCandidate)
 	rows, err = s.scratch.QueryContext(ctx, `
@@ -725,7 +741,7 @@ func (s *codexStagingSink) PublishToolResultImages(ctx context.Context) error {
 			if participates == 0 {
 				summary = ""
 			}
-			candidate := singleSummaryCandidate{length: len(summary)}
+			candidate := singleSummaryCandidate{length: len(summary), outcome: ingest.ClassifyToolResult(s.toolNameByCallKey[callKey], s.categoryByCallKey[callKey], summary, s.statusByCallKey[callKey])}
 			if !s.disableSignals {
 				candidate.failure = signals.IsFailure(signals.ToolCallRow{
 					Category:      s.categoryByCallKey[callKey],
@@ -748,6 +764,7 @@ func (s *codexStagingSink) PublishToolResultImages(ctx context.Context) error {
 	}
 	for callKey, candidate := range candidates {
 		s.singleSummaryLengths[callKey] = candidate.length
+		s.contentOutcomes[callKey] = candidate.outcome
 		if !s.disableSignals {
 			s.contentFailures[callKey] = candidate.failure
 		}
@@ -981,6 +998,17 @@ func (s *codexStagingSink) ResolveSummary(
 		}
 		s.contentFailures[stageKey] = verdict
 	}
+	s.recordContentOutcome(stageKey, summary, s.statusByCallKey[stageKey])
+	selectedEvents := make([]db.ToolResultEvent, 0, len(latest)+1)
+	for _, content := range latest {
+		selectedEvents = append(selectedEvents, db.ToolResultEvent{Content: content})
+	}
+	if hasAnon {
+		selectedEvents = append(selectedEvents, db.ToolResultEvent{Content: lastAnon})
+	}
+	if !s.disableSignals && ingest.ToolResultContentUnknown(db.ToolCall{ResultEvents: selectedEvents}) && s.contentOutcomes[stageKey] != "errored" {
+		s.contentOutcomes[stageKey] = "unknown"
+	}
 	if eventCount == 1 {
 		summary = db.DedupToolCallResultSummary(
 			summary, []db.ToolResultEvent{{Content: soleContent}},
@@ -1066,3 +1094,15 @@ func (s *codexStagingSink) resolveBlockedSummaryLength(
 func (s *codexStagingSink) ContentFailures() map[string]bool {
 	return s.contentFailures
 }
+
+func (s *codexStagingSink) recordContentOutcome(key, content, status string) {
+	if s.disableSignals {
+		return
+	}
+	if s.contentOutcomes == nil {
+		s.contentOutcomes = make(map[string]string)
+	}
+	s.contentOutcomes[key] = ingest.ClassifyToolResult(s.toolNameByCallKey[key], s.categoryByCallKey[key], content, status)
+}
+
+func (s *codexStagingSink) ContentOutcomes() map[string]string { return s.contentOutcomes }

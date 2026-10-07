@@ -644,6 +644,11 @@ func replaceSessionMessagesTxStaged(
 						sessionID, tc.ToolUseID, err,
 					)
 				}
+				if source, ok := staged.(interface{ ContentOutcomes() map[string]string }); ok {
+					if outcome, exists := source.ContentOutcomes()[stageKey]; exists && !blocked[tc.Category] {
+						msgs[i].ToolCalls[callIdx].StagedOutcome = &outcome
+					}
+				}
 				tc.ResultContentLength = length
 				if !blocked[tc.Category] {
 					tc.ResultContent = summary

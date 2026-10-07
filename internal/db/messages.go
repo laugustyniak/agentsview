@@ -54,7 +54,7 @@ const (
 	// 999-variable limit so binaries built against older SQLite
 	// versions still work.
 	messageInsertRowsPerStmt         = 35  // 28 params per row
-	toolCallInsertRowsPerStmt        = 83  // 12 params per row (999/12 = 83)
+	toolCallInsertRowsPerStmt        = 66  // 15 params per row
 	toolResultEventInsertRowsPerStmt = 70  // 14 params per row
 	toolCallAgentStateRowsPerStmt    = 166 // 6 params per row
 )
@@ -62,6 +62,10 @@ const (
 // ToolCall represents a single tool invocation stored in
 // the tool_calls table.
 type ToolCall struct {
+	StagedOutcome       *string           `json:"-"`
+	ObservedOutcome     *string           `json:"-"`
+	ObservedRepeat      *string           `json:"-"`
+	SequenceEnding      *string           `json:"-"`
 	MessageID           int64             `json:"-"`
 	SessionID           string            `json:"-"`
 	ToolName            string            `json:"tool_name"`
@@ -1276,7 +1280,7 @@ func multiRowPlaceholders(rows, cols int) string {
 func insertToolCallsChunkTx(
 	tx transactionQueries, calls []ToolCall,
 ) error {
-	args := make([]any, 0, len(calls)*12)
+	args := make([]any, 0, len(calls)*15)
 	for _, tc := range calls {
 		args = append(args,
 			tc.MessageID, tc.SessionID,
@@ -1288,7 +1292,7 @@ func insertToolCallsChunkTx(
 			nilIfEmpty(tc.ResultContent),
 			nilIfEmpty(tc.SubagentSessionID),
 			nilIfEmpty(tc.FilePath),
-			tc.CallIndex,
+			tc.CallIndex, tc.ObservedOutcome, tc.ObservedRepeat, tc.SequenceEnding,
 		)
 	}
 	query := `
@@ -1296,8 +1300,8 @@ func insertToolCallsChunkTx(
 			(message_id, session_id, tool_name, category,
 			 tool_use_id, input_json, skill_name,
 			 result_content_length, result_content, subagent_session_id,
-			 file_path, call_index)
-		VALUES ` + multiRowPlaceholders(len(calls), 12)
+			 file_path, call_index, observed_outcome, observed_repeat, sequence_ending)
+		VALUES ` + multiRowPlaceholders(len(calls), 15)
 	if _, err := tx.Exec(query, args...); err != nil {
 		return fmt.Errorf(
 			"inserting tool_calls batch (%d rows): %w",
@@ -1716,6 +1720,11 @@ func (db *DB) writeSessionIncremental(ctx context.Context,
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	var previousTermination sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT termination_status FROM sessions WHERE id = ?`, sessionID).Scan(&previousTermination); err != nil {
+		return false, err
+	}
+	terminationChanged := previousTermination.Valid != (update.TerminationStatus != nil) || (update.TerminationStatus != nil && previousTermination.String != *update.TerminationStatus)
 	var replaced *messageRangeTotals
 	var pendingRecallRevocations recallEvidenceRevocationEvents
 	if from := update.ReplaceFromOrdinal; from != nil {
@@ -1822,7 +1831,7 @@ func (db *DB) writeSessionIncremental(ctx context.Context,
 		return false, err
 	}
 	signalsMaintained := false
-	if !db.ArchiveContent().OmitsToolContent() && update.SignalMaintainer != nil {
+	if !db.ArchiveContent().OmitsToolContent() && !terminationChanged && update.SignalMaintainer != nil {
 		delta, err := update.SignalMaintainer.MaintainTx(
 			context.Background(), signalTxQuery{
 				tx:                          tx,
@@ -2435,6 +2444,7 @@ func (db *DB) replaceSessionContent(ctx context.Context,
 		findings = nil
 	}
 	if db.ArchiveContent().OmitsToolContent() {
+		signals.ToolObservations = []ToolObservation{}
 		cp, blobs = nil, nil
 	}
 
@@ -2960,7 +2970,7 @@ func attachToolCallsBatch(
 		SELECT message_id, session_id, tool_name, category,
 			tool_use_id, input_json, skill_name,
 			result_content_length, result_content, subagent_session_id,
-			file_path, call_index
+			file_path, call_index, observed_outcome, observed_repeat, sequence_ending
 		FROM tool_calls
 		WHERE message_id IN (%s)
 		ORDER BY message_id, call_index`,
@@ -2984,7 +2994,7 @@ func attachToolCallsBatch(
 			&tc.ToolName, &tc.Category,
 			&toolUseID, &inputJSON, &skillName,
 			&resultLen, &resultContent, &subagentSessionID,
-			&filePath, &callIndex,
+			&filePath, &callIndex, &tc.ObservedOutcome, &tc.ObservedRepeat, &tc.SequenceEnding,
 		); err != nil {
 			return fmt.Errorf("scanning tool_call: %w", err)
 		}
@@ -4024,7 +4034,7 @@ func toolCallFingerprintWithQuerier(ctx context.Context, q messageRowsQuerier, s
 			COALESCE(tc.subagent_session_id, ''),
 			COALESCE(tc.result_content_length, 0),
 			COALESCE(tc.result_content, ''),
-			COALESCE(tc.file_path, '')
+			COALESCE(tc.file_path, ''), COALESCE(tc.observed_outcome, ''), COALESCE(tc.observed_repeat, ''), COALESCE(tc.sequence_ending, '')
 		 FROM tool_calls tc
 		 JOIN messages m ON m.id = tc.message_id
 		 WHERE tc.session_id = ?
@@ -4044,7 +4054,7 @@ func toolCallFingerprintWithQuerier(ctx context.Context, q messageRowsQuerier, s
 			&r.messageOrdinal, &r.toolName, &r.category,
 			&r.toolUseID, &r.inputJSON, &r.skillName,
 			&r.subagentSessionID, &r.resultContentLength,
-			&r.resultContent, &r.filePath,
+			&r.resultContent, &r.filePath, &r.observedOutcome, &r.observedRepeat, &r.sequenceEnding,
 		); err != nil {
 			return "", err
 		}
@@ -4162,6 +4172,7 @@ func resolveToolCalls(
 				SubagentSessionID: tc.SubagentSessionID,
 				FilePath:          tc.FilePath,
 				CallIndex:         callIdx,
+				ObservedOutcome:   tc.ObservedOutcome, ObservedRepeat: tc.ObservedRepeat, SequenceEnding: tc.SequenceEnding,
 			})
 		}
 	}

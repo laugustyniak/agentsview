@@ -5,6 +5,15 @@ import type { GetApiV1AnalyticsSignalSessionsAutomatedScope } from "./getApiV1An
 
 export type GetApiV1AnalyticsSignalSessionsParams = {
   /**
+   * Tool name for a tool rate
+   */
+  tool_name?: string;
+  /**
+   * Session evidence offset
+   * @minimum 0
+   */
+  offset?: number;
+  /**
    * Range start date
    */
   from?: string;

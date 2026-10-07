@@ -313,6 +313,9 @@ CREATE INDEX IF NOT EXISTS idx_cursor_usage_events_model
 
 -- Tool calls table
 CREATE TABLE IF NOT EXISTS tool_calls (
+    observed_outcome TEXT,
+    observed_repeat TEXT,
+    sequence_ending TEXT,
     id         INTEGER PRIMARY KEY,
     message_id INTEGER NOT NULL
         REFERENCES messages(id) ON DELETE CASCADE,
