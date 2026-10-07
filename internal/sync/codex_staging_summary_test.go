@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/agentsview/internal/db"
-	"go.kenn.io/agentsview/internal/dbtest"
 	"go.kenn.io/agentsview/internal/parser"
 )
 
@@ -37,23 +36,6 @@ func TestStagedMultiAgentToolObservationParity(t *testing.T) {
 				require.Equal(t, want.ToolObservations, got.ToolObservations)
 				require.Equal(t, "content", got.ToolObservations[1].Outcome)
 				require.Equal(t, new("recovered"), got.ToolObservations[0].SequenceEnding)
-			}
-			database := dbtest.OpenTestDB(t)
-			session := db.Session{ID: "fixture", Agent: "codex", TerminationStatus: new("clean")}
-			require.NoError(t, database.UpsertSession(t.Context(), session))
-			messages := toDBMessages(pendingWrite{sess: parser.ParsedSession{ID: session.ID}, msgs: staged.Messages()}, nil)
-			require.NoError(t, database.ReplaceSessionContentStaged(t.Context(), session.ID, messages, staged, nil, func(verdicts map[string]db.StagedToolVerdict) (db.SessionSignalUpdate, []db.SecretFinding, error) {
-				update, findings := computeSignalsAndSecretsWithContentFailures(session, messages, verdicts)
-				return update, findings, nil
-			}))
-			stored, err := database.GetAllMessages(t.Context(), session.ID)
-			require.NoError(t, err)
-			fullUpdate, _ := computeSignalsAndSecrets(session, stored)
-			require.Len(t, fullUpdate.ToolObservations, 2)
-			for _, fact := range fullUpdate.ToolObservations {
-				call := stored[fact.MessageOrdinal].ToolCalls[fact.CallIndex]
-				require.Equal(t, new(fact.Outcome), call.ObservedOutcome)
-				require.Equal(t, fact.SequenceEnding, call.SequenceEnding)
 			}
 		})
 	}

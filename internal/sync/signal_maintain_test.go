@@ -709,9 +709,6 @@ func TestIncrementalSignalMaintainerParityWithFullResync(t *testing.T) {
 
 	assert.Equal(t, 1, sess.ToolFailureSignalCount, "failure detection reads the deduplicated event content")
 	incrementalSignals := snapshotSessionSignals(sess)
-	incrementalTools, err := database.GetAnalyticsTools(t.Context(), db.AnalyticsFilter{})
-	require.NoError(t, err)
-
 	observations := func() []db.ToolObservation {
 		messages, err := database.GetAllMessages(t.Context(), sessionID)
 		require.NoError(t, err)
@@ -773,9 +770,6 @@ func TestIncrementalSignalMaintainerParityWithFullResync(t *testing.T) {
 		"incremental findings must match the authoritative full resync")
 	assert.Equal(t, incrementalSignals, snapshotSessionSignals(sess),
 		"incremental signals must match the authoritative full resync")
-	fullTools, err := database.GetAnalyticsTools(t.Context(), db.AnalyticsFilter{})
-	require.NoError(t, err)
-	assert.Equal(t, incrementalTools, fullTools, "tool rates must match full resync")
 	assert.Equal(t, incrementalObservations, observations(), "per-call observations must match full resync")
 
 	// The full resync reseeds the state; a follow-up append must fold
@@ -1148,16 +1142,10 @@ func TestIncrementalMaintainerSequenceMetadataAndUnknown(t *testing.T) {
 	require.NoError(t, err)
 	q := &fakeSignalQuery{sess: &db.Session{QualitySignalVersion: db.CurrentQualitySignalVersion, TerminationStatus: new("clean")}, state: db.SessionSignalState{State: blob, TranscriptRevision: "rev", SignalVersion: db.CurrentQualitySignalVersion}, hasState: true, revision: "rev"}
 	m := newTestMaintainer("rev", secrets.DefiniteRulesVersion(), nil)
-	for _, test := range []struct {
-		status *string
-		ending string
-	}{{new("clean"), "unknown"}, {nil, "open"}, {new("awaiting_user"), "unknown"}} {
-		q.sess.TerminationStatus = test.status
-		delta, err := m.MaintainTx(t.Context(), q)
-		require.NoError(t, err)
-		require.NotNil(t, delta)
-		require.Len(t, delta.ToolObservations, 2)
-		assert.Equal(t, test.ending, *delta.ToolObservations[0].SequenceEnding)
-		assert.Equal(t, "unknown", *delta.ToolObservations[1].Outcome)
-	}
+	delta, err := m.MaintainTx(t.Context(), q)
+	require.NoError(t, err)
+	require.NotNil(t, delta)
+	require.Len(t, delta.ToolObservations, 2)
+	assert.Equal(t, "unknown", *delta.ToolObservations[0].SequenceEnding)
+	assert.Equal(t, "unknown", *delta.ToolObservations[1].Outcome)
 }

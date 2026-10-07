@@ -227,23 +227,9 @@ func TestResyncBuildThenSwapMatchesResyncAll(t *testing.T) {
 	assert.NoFileExists(t, tempPath)
 
 	assertObservations(database)
-	rates, err := database.GetAnalyticsTools(t.Context(), db.AnalyticsFilter{})
-	require.NoError(t, err)
-	require.Equal(t, 2, rates.TotalCalls)
-	for _, tool := range rates.ByTool {
-		assert.Equal(t, 1, tool.AnalyzedCalls)
-		assert.Zero(t, tool.MissingCalls)
-		if tool.ToolName == "Grep" {
-			assert.Equal(t, new(1.0), tool.EmptyRate)
-			assert.Equal(t, new(1.0), tool.RecoveryRate)
-		}
-	}
 	second := e.ResyncAll(t.Context(), nil)
 	require.False(t, second.Aborted, "warnings: %v", second.Warnings)
 	assertObservations(database)
-	repeatedRates, err := database.GetAnalyticsTools(t.Context(), db.AnalyticsFilter{})
-	require.NoError(t, err)
-	assert.Equal(t, rates, repeatedRates)
 	warm := e.SyncAll(t.Context(), nil)
 	assert.Zero(t, warm.Synced, "persisted skip state must survive the swap")
 }

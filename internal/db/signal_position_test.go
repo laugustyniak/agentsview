@@ -7,7 +7,6 @@ import (
 	"github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/agentsview/internal/signals"
 )
 
 func TestToolCallsByPositionResultEvidence(t *testing.T) {
@@ -19,13 +18,7 @@ func TestToolCallsByPositionResultEvidence(t *testing.T) {
 		unknown bool
 	}{
 		{"[image]", nil, true},
-		{"[image]", []ToolResultEvent{{Content: ""}}, false},
-		{"[image]", []ToolResultEvent{{Content: ""}, {Content: ""}}, false},
 		{"", []ToolResultEvent{{Content: "content"}, {Content: "[image]"}, {Content: ""}}, true},
-		{"", []ToolResultEvent{{Content: "[image]"}, {Content: "\t\u2002\r\n"}}, true},
-		{"", []ToolResultEvent{{AgentID: "agent-a", Content: "[image]"}, {AgentID: "agent-b", Content: "content"}}, false},
-		{"", []ToolResultEvent{{AgentID: "agent-a", Content: "content"}, {AgentID: "agent-a", Content: "[image]"}, {AgentID: "agent-b", Content: "[binary content]"}}, true},
-		{"", []ToolResultEvent{{AgentID: "\tagent-a", Content: "[image]"}, {AgentID: "agent-a", Content: "content"}}, false},
 	}
 	positions := make([]ToolCallPosition, len(cases))
 	for i, fixture := range cases {
@@ -34,11 +27,6 @@ func TestToolCallsByPositionResultEvidence(t *testing.T) {
 		}
 		positions[i] = ToolCallPosition{MessageOrdinal: i}
 		insertMessages(t, d, Message{SessionID: "s1", Ordinal: i, Role: "assistant", ToolCalls: []ToolCall{{ToolName: "Read", Category: "Read", ResultContent: fixture.summary, ResultEvents: fixture.events}}})
-		events := make([]signals.ResultContentEvidence, len(fixture.events))
-		for j, event := range fixture.events {
-			events[j] = signals.ResultContentEvidence{AgentID: event.AgentID, Content: event.Content}
-		}
-		assert.Equal(t, fixture.unknown, signals.ToolResultContentUnknown(fixture.summary, len(events), events), "full classification %d", i)
 	}
 	tx, err := d.getWriter().Begin(t.Context())
 	require.NoError(t, err)

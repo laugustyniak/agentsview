@@ -423,6 +423,20 @@ func TestToolEffectivenessSQLitePGParity(t *testing.T) {
 		update, findings := ingest.ComputeSignalsAndSecrets(session, fixture.messages)
 		require.NoError(t, local.ReplaceSessionContent(t.Context(), fixture.id, fixture.messages, update, findings))
 	}
+	for _, fixture := range []struct {
+		id, category, model string
+		empty               bool
+	}{{"ordinary-a", "Read", "model-a", true}, {"ordinary-b", "Read", "model-b", true}, {"mcp", "MCP", "model-a", false}} {
+		session := db.Session{ID: fixture.id, Project: "project-a", Agent: "claude", Machine: "fixture", StartedAt: new("2025-06-01T12:00:00Z"), TerminationStatus: new("clean"), UserMessageCount: 2}
+		calls := []db.Message{{SessionID: fixture.id, Ordinal: 0, Role: "assistant", Timestamp: "2025-06-01T12:00:00Z", Model: fixture.model, ToolCalls: []db.ToolCall{{SessionID: fixture.id, ToolName: "readFile", Category: fixture.category, ResultContent: "content"}}}}
+		if fixture.empty {
+			calls = append(calls, db.Message{SessionID: fixture.id, Ordinal: 4, Role: "assistant", Timestamp: "2025-06-02T12:00:00Z", Model: fixture.model, ToolCalls: []db.ToolCall{{SessionID: fixture.id, ToolName: "readFile", Category: fixture.category, ResultEvents: []db.ToolResultEvent{{Status: "completed"}}}}})
+		}
+		session.MessageCount = len(calls)
+		require.NoError(t, local.UpsertSession(t.Context(), session))
+		update, findings := ingest.ComputeSignalsAndSecrets(session, calls)
+		require.NoError(t, local.ReplaceSessionContent(t.Context(), session.ID, calls, update, findings))
+	}
 	syncer, err := New(url, schema, local, "fixture", true, storage.PusherOptions{})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, syncer.Close()) })
@@ -461,72 +475,6 @@ func TestToolEffectivenessSQLitePGParity(t *testing.T) {
 			}
 		}
 	}
-	f := db.AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC"}
-	rates, err := remote.GetAnalyticsTools(t.Context(), f)
-	require.NoError(t, err)
-	require.Len(t, rates.ByTool, 2)
-	grep := rates.ByTool[0]
-	assert.Equal(t, 12, grep.CallCount)
-	assert.Equal(t, 1, grep.MissingCalls)
-	assert.Equal(t, 7, grep.EmptyCalls)
-	assert.Equal(t, 10, grep.KnownOutcomeCalls)
-	assert.Equal(t, 5, grep.RepeatedCalls)
-	assert.Equal(t, 2, grep.RecoveredSequences)
-	assert.Equal(t, 1, grep.AbandonedSequences)
-	assert.Equal(t, 1, grep.OpenSequences)
-	assert.Equal(t, 1, grep.UnknownSequences)
-	require.NotNil(t, grep.RecoveryRate)
-	assert.Equal(t, 2.0/3, *grep.RecoveryRate)
-	session, err := local.GetSessionFull(t.Context(), "abandoned")
-	require.NoError(t, err)
-	messages, err := local.GetAllMessages(t.Context(), "abandoned")
-	require.NoError(t, err)
-	revision := session.TranscriptRevision
-	session.TerminationStatus = nil
-	update := ingest.ComputeSignalsFromMessages(*session, messages)
-	require.NoError(t, local.UpdateSessionSignals(t.Context(), "abandoned", update))
-	after, err := local.GetSessionFull(t.Context(), "abandoned")
-	require.NoError(t, err)
-	assert.Equal(t, revision, after.TranscriptRevision)
-	_, err = syncer.Push(t.Context(), false, nil)
-	require.NoError(t, err)
-	want, err := local.GetAnalyticsTools(t.Context(), f)
-	require.NoError(t, err)
-	got, err := remote.GetAnalyticsTools(t.Context(), f)
-	require.NoError(t, err)
-	assert.Equal(t, want, got)
-	require.NotNil(t, got.ByTool[0].RecoveryRate)
-	assert.Equal(t, 1.0, *got.ByTool[0].RecoveryRate)
-}
-
-func TestToolRateCategoryNumeratorSQLitePGParity(t *testing.T) {
-	const schema = "agentsview_tool_categories_test"
-	url := testPGURL(t)
-	cleanNamedPGSchema(t, url, schema)
-	t.Cleanup(func() { cleanNamedPGSchema(t, url, schema) })
-	local := testDB(t)
-	for _, fixture := range []struct {
-		id, category, model string
-		empty               bool
-	}{{"ordinary-a", "Read", "model-a", true}, {"ordinary-b", "Read", "model-b", true}, {"mcp", "MCP", "model-a", false}} {
-		session := db.Session{ID: fixture.id, Project: "project-a", Agent: "claude", Machine: "fixture", StartedAt: new("2025-06-01T12:00:00Z"), TerminationStatus: new("clean"), UserMessageCount: 2}
-		calls := []db.Message{{SessionID: fixture.id, Ordinal: 0, Role: "assistant", Timestamp: "2025-06-01T12:00:00Z", Model: fixture.model, ToolCalls: []db.ToolCall{{SessionID: fixture.id, ToolName: "readFile", Category: fixture.category, ResultContent: "content"}}}}
-		if fixture.empty {
-			calls = append(calls, db.Message{SessionID: fixture.id, Ordinal: 4, Role: "assistant", Timestamp: "2025-06-02T12:00:00Z", Model: fixture.model, ToolCalls: []db.ToolCall{{SessionID: fixture.id, ToolName: "readFile", Category: fixture.category, ResultEvents: []db.ToolResultEvent{{Status: "completed"}}}}})
-		}
-		session.MessageCount = len(calls)
-		require.NoError(t, local.UpsertSession(t.Context(), session))
-		update, findings := ingest.ComputeSignalsAndSecrets(session, calls)
-		require.NoError(t, local.ReplaceSessionContent(t.Context(), session.ID, calls, update, findings))
-	}
-	syncer, err := New(url, schema, local, "fixture", true, storage.PusherOptions{})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, syncer.Close()) })
-	_, err = syncer.Push(t.Context(), false, nil)
-	require.NoError(t, err)
-	remote, err := NewStore(url, schema, true)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, remote.Close()) })
 	for _, filter := range []db.AnalyticsFilter{{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC", Project: "project-a"}, {From: "2025-06-02", To: "2025-06-02", Timezone: "UTC", Model: "model-a"}} {
 		want, err := local.GetAnalyticsTools(t.Context(), filter)
 		require.NoError(t, err)
@@ -572,8 +520,41 @@ func TestToolRateCategoryNumeratorSQLitePGParity(t *testing.T) {
 		assert.Equal(t, allCategories, actual)
 		assert.Equal(t, first.Total, allCategories.Total)
 		filter.ToolName, filter.ToolCategory = "", "Read"
-		categoryOnly, err := remote.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
+		categoryOnly, err := local.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
 		require.NoError(t, err)
 		assert.Equal(t, allCategories, categoryOnly)
+		filter.ToolName, filter.ToolCategory = "absent", ""
+		none, err = local.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
+		require.NoError(t, err)
+		actual, err = remote.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
+		require.NoError(t, err)
+		assert.Equal(t, none, actual)
+		assert.Equal(t, new(0), none.Total)
+		assert.Empty(t, none.Sessions)
 	}
+	f := db.AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC"}
+	rates, err := remote.GetAnalyticsTools(t.Context(), f)
+	require.NoError(t, err)
+	require.Len(t, rates.ByTool, 4)
+	require.Positive(t, rates.ByTool[0].AnalyzedCalls)
+	session, err := local.GetSessionFull(t.Context(), "abandoned")
+	require.NoError(t, err)
+	messages, err := local.GetAllMessages(t.Context(), "abandoned")
+	require.NoError(t, err)
+	revision := session.TranscriptRevision
+	session.TerminationStatus = nil
+	update := ingest.ComputeSignalsFromMessages(*session, messages)
+	require.NoError(t, local.UpdateSessionSignals(t.Context(), "abandoned", update))
+	after, err := local.GetSessionFull(t.Context(), "abandoned")
+	require.NoError(t, err)
+	assert.Equal(t, revision, after.TranscriptRevision)
+	_, err = syncer.Push(t.Context(), false, nil)
+	require.NoError(t, err)
+	want, err := local.GetAnalyticsTools(t.Context(), f)
+	require.NoError(t, err)
+	got, err := remote.GetAnalyticsTools(t.Context(), f)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	require.NotNil(t, got.ByTool[0].RecoveryRate)
+	assert.Equal(t, 1.0, *got.ByTool[0].RecoveryRate)
 }

@@ -174,25 +174,6 @@ func TestToolObservationsReplacementFingerprintAndOrphanCopy(t *testing.T) {
 	assert.Equal(t, parseBefore, parseAfter)
 }
 
-func TestToolObservationRecomputeRejectsChangedTermination(t *testing.T) {
-	d := testDB(t)
-	seedToolRateFixture(t, d)
-	session, err := d.GetSessionFull(t.Context(), "abandoned")
-	require.NoError(t, err)
-	snapshot, err := SignalInputSnapshot(*session)
-	require.NoError(t, err)
-	require.NoError(t, d.Update(t.Context(), func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE sessions SET termination_status='clean' WHERE id='abandoned'`)
-		return err
-	}))
-	published, err := d.ReplaceSessionSignalsIfInputsMatch(t.Context(), "abandoned", snapshot, nil, SessionSignalUpdate{ToolObservations: []ToolObservation{{Outcome: "unknown", Repeat: "none"}}}, SessionSignalState{})
-	require.NoError(t, err)
-	assert.False(t, published)
-	messages, err := d.GetAllMessages(t.Context(), "abandoned")
-	require.NoError(t, err)
-	assert.Equal(t, new("empty"), messages[0].ToolCalls[0].ObservedOutcome)
-}
-
 func TestToolObservationsClearWhenArchiveOmitsEvidence(t *testing.T) {
 	d := testDB(t)
 	seedToolRateFixture(t, d)

@@ -169,13 +169,7 @@ describe("ToolUsage", () => {
     expect(
       document.querySelector('[title="2/3 recovered sequences. Open: 1. Unknown: 1."]'),
     ).not.toBeNull();
-    unmount(component);
-  });
-
-  it("renders measured zero rates as text", async () => {
-    seedRates();
     analytics.tools!.by_tool![0]!.repeat_rate = 0;
-    const component = mount(ToolUsage, { target: document.body });
     await tick();
     expect(document.body.textContent).toContain("0.0%");
     expect(document.querySelector('[aria-label="Grep Repeat rate"]')).toBeNull();
@@ -246,29 +240,6 @@ describe("ToolUsage", () => {
     analytics.model = "";
   });
 
-  it("refreshes evidence after a filter changes", async () => {
-    seedRates();
-    const fetch = vi
-      .spyOn(AnalyticsService, "getApiV1AnalyticsSignalSessions")
-      .mockResolvedValueOnce({ signal: "tool_empty_rate", total: 0, sessions: [] })
-      .mockResolvedValue({ signal: "tool_empty_rate", sessions: [] });
-    const component = mount(ToolUsage, { target: document.body });
-    await tick();
-    (document.querySelector('[aria-label="Grep Empty rate"]') as HTMLButtonElement).click();
-    await tick();
-    await tick();
-    expect(document.querySelector(".tool-evidence")?.textContent).toContain("0 sessions");
-    analytics.project = "project-b";
-    await tick();
-    expect(fetch).toHaveBeenLastCalledWith(
-      expect.objectContaining({ project: "project-b", tool_name: "Grep" }),
-      expect.anything(),
-    );
-    await tick();
-    expect(document.querySelector(".tool-evidence")?.textContent).not.toContain("0 sessions");
-    unmount(component);
-    analytics.project = "";
-  });
   it("keeps duplicate tool categories through pagination and filter refresh", async () => {
     seedRates();
     const row = analytics.tools!.by_tool[0]!;
@@ -299,9 +270,12 @@ describe("ToolUsage", () => {
       expect.objectContaining({ tool_category: "Read", offset: 1 }),
       expect.anything(),
     );
+    fetch.mockResolvedValueOnce({ signal: "tool_empty_rate", total: 0, sessions: [] })
+      .mockResolvedValue({ signal: "tool_empty_rate", sessions: [] });
     (buttons[1] as HTMLButtonElement).click();
     await tick();
     await tick();
+    expect(document.querySelector(".tool-evidence")?.textContent).toContain("0 sessions");
     analytics.project = "project-b";
     await tick();
     await tick();
@@ -309,6 +283,7 @@ describe("ToolUsage", () => {
       expect.objectContaining({ project: "project-b", tool_category: "MCP", offset: 0 }),
       expect.anything(),
     );
+    expect(document.querySelector(".tool-evidence")?.textContent).not.toContain("0 sessions");
     unmount(component);
     analytics.project = "";
   });
