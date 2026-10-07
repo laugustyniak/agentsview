@@ -219,7 +219,7 @@ func (m *incrementalSignalMaintainer) MaintainTx(
 		return nil, nil // out-of-window modification: reseed
 	}
 
-	complete := sess.TerminationStatus != nil && (*sess.TerminationStatus == "clean" || *sess.TerminationStatus == "awaiting_user")
+	complete := signals.SessionComplete(sess.TerminationStatus)
 	prefix, changes := state.FoldToolSequences(appendedRows, modified, complete)
 	nextState.SequencePrefix = prefix
 	observations := make([]db.ToolObservationDelta, 0, len(changes))

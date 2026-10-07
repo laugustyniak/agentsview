@@ -44,9 +44,6 @@ var supportedAnalyticsSignals = map[string]struct{}{
 }
 
 func IsSupportedAnalyticsSignal(signal string) bool {
-	if IsToolMetric(signal) {
-		return true
-	}
 	_, ok := supportedAnalyticsSignals[signal]
 	return ok
 }

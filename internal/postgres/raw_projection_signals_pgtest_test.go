@@ -8,8 +8,46 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/agentsview/internal/config"
+	"go.kenn.io/agentsview/internal/db"
+	"go.kenn.io/agentsview/internal/ingest"
 	"go.kenn.io/agentsview/internal/parser"
 )
+
+func TestRawProjectionTranscriptsOnlyToolCoverage(t *testing.T) {
+	f := newHostedFixture(t, "tenant-tool-coverage")
+	options := RawProjectionOptions{Tenant: f.tenant, Content: ingest.ContentOptions{ArchiveContent: config.ArchiveContentTranscripts}}
+	sink, err := NewRawProjectionStore(f.runtime, options)
+	require.NoError(t, err)
+	outcome := projectionOutcome("Check the fixture")
+	outcome.Outcome.Results[0].Result.Messages = append(outcome.Outcome.Results[0].Result.Messages, parser.ParsedMessage{
+		Ordinal: 2, Role: parser.RoleAssistant, ToolCalls: []parser.ParsedToolCall{{ToolUseID: "call-2", ToolName: "Bash", Category: "Bash", InputJSON: `{"command":"true"}`}},
+	})
+	candidate, err := ingest.PrepareCandidate(t.Context(), outcome.Outcome.Results[0].Result, options.Content)
+	require.NoError(t, err)
+	prepared, err := ingest.Finalize(t.Context(), candidate, options.Content)
+	require.NoError(t, err)
+	require.NotNil(t, prepared.Signals.ToolObservations)
+	assert.Empty(t, prepared.Signals.ToolObservations)
+	revision, err := rawContentRevision(prepared)
+	require.NoError(t, err)
+	tx, err := f.runtime.BeginTx(t.Context(), nil)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, sink.writePayload(t.Context(), tx, "fixture-session", "fixture-group", revision, prepared))
+	require.NoError(t, tx.Commit())
+	store := &Store{pg: f.runtime}
+	rates, err := store.GetAnalyticsTools(t.Context(), db.AnalyticsFilter{From: "2026-01-01", To: "2026-01-01", Timezone: "UTC"})
+	require.NoError(t, err)
+	require.Len(t, rates.ByTool, 1)
+	tool := rates.ByTool[0]
+	assert.Equal(t, 2, tool.CallCount)
+	assert.Zero(t, tool.AnalyzedCalls)
+	assert.Equal(t, 2, tool.MissingCalls)
+	assert.Nil(t, tool.EmptyRate)
+	assert.Nil(t, tool.RepeatRate)
+	assert.Nil(t, tool.RecoveryRate)
+}
 
 func TestRawProjectionEqualContentSettlesSignalsWithoutNewIdentity(t *testing.T) {
 	f := newProjectionFixture(t)

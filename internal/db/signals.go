@@ -406,9 +406,16 @@ func (db *DB) MarkSignalsBackfillDone(ctx context.Context) error {
 
 // ApplyToolObservations carries prepared observations into an existing mirror writer.
 func ApplyToolObservations(messages []Message, observations []ToolObservation) {
+	if observations == nil {
+		return
+	}
 	byOrdinal := make(map[int]int, len(messages))
 	for i, message := range messages {
 		byOrdinal[message.Ordinal] = i
+		for j := range messages[i].ToolCalls {
+			call := &messages[i].ToolCalls[j]
+			call.ObservedOutcome, call.ObservedRepeat, call.SequenceEnding = nil, nil, nil
+		}
 	}
 	for _, fact := range observations {
 		i, ok := byOrdinal[fact.MessageOrdinal]

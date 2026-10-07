@@ -2482,8 +2482,12 @@ func (db *DB) replaceSessionContent(ctx context.Context,
 		if err := applySessionMessageDiffTx(ctx, tx, sessionID, plan); err != nil {
 			return err
 		}
-	} else if err := replaceSessionMessagesTx(tx, sessionID, msgs); err != nil {
-		return err
+	} else {
+		ApplyToolObservations(msgs, signals.ToolObservations)
+		if err := replaceSessionMessagesTx(tx, sessionID, msgs); err != nil {
+			return err
+		}
+		signals.ToolObservations = nil
 	}
 	if transcriptChanged {
 		if err := bumpTranscriptRevisionTx(tx, sessionID); err != nil {

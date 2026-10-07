@@ -153,7 +153,7 @@ func ComputeSignalsFromToolRows(
 			RunawayToolLoopCount:        heuristics.RunawayToolLoopCount,
 		},
 	}
-	complete := session.TerminationStatus != nil && (*session.TerminationStatus == "clean" || *session.TerminationStatus == "awaiting_user")
+	complete := signals.SessionComplete(session.TerminationStatus)
 	extracted := signals.ExtractToolSequences(rows, complete)
 	update.ToolObservations = make([]db.ToolObservation, len(extracted.Calls))
 	for i, call := range extracted.Calls {

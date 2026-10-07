@@ -409,28 +409,51 @@ func (q signalTxQuery) toolCallsByPositionChunk(
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
+	index := make(map[ToolCallPosition]int, len(facts))
+	for i, fact := range facts {
+		index[ToolCallPosition{MessageOrdinal: fact.MessageOrdinal, CallIndex: fact.CallIndex}] = i
+	}
+	// SQLite's default TRIM omits the whitespace recognized by Go's TrimSpace.
+	const whitespace = "\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+	evidence, err := q.tx.QueryContext(ctx, `
+		WITH wanted(message_ordinal, call_index) AS (
+			VALUES `+multiRowPlaceholders(len(positions), 2)+`
+		), ranked AS (
+			SELECT tre.tool_call_message_ordinal AS ordinal, tre.call_index,
+			       COALESCE(tre.agent_id, '') AS agent_id, tre.content, tre.event_index, tre.id,
+			       COUNT(*) OVER (PARTITION BY tre.tool_call_message_ordinal, tre.call_index) AS event_count,
+			       ROW_NUMBER() OVER (
+			           PARTITION BY tre.tool_call_message_ordinal, tre.call_index, TRIM(COALESCE(tre.agent_id, ''), '`+whitespace+`')
+			           ORDER BY (TRIM(tre.content, '`+whitespace+`') <> '') DESC, tre.event_index DESC, tre.id DESC
+			       ) AS rank
+			FROM wanted JOIN tool_result_events tre
+			  ON tre.tool_call_message_ordinal = wanted.message_ordinal AND tre.call_index = wanted.call_index
+			WHERE tre.session_id = ?
+		)
+		SELECT ordinal, call_index, agent_id, content, event_count FROM ranked WHERE rank = 1 ORDER BY event_index, id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer evidence.Close()
+	events := make([][]signals.ResultContentEvidence, len(facts))
+	counts := make([]int, len(facts))
+	for evidence.Next() {
+		var position ToolCallPosition
+		var event signals.ResultContentEvidence
+		var count int
+		if err := evidence.Scan(&position.MessageOrdinal, &position.CallIndex, &event.AgentID, &event.Content, &count); err != nil {
+			return nil, err
+		}
+		if i, ok := index[position]; ok {
+			events[i] = append(events[i], event)
+			counts[i] = count
+		}
+	}
+	if err := evidence.Err(); err != nil {
+		return nil, err
+	}
 	for i := range facts {
-		fact := &facts[i]
-		evidence, err := q.tx.QueryContext(ctx, `SELECT content FROM tool_result_events WHERE id IN (SELECT MAX(id) FROM tool_result_events WHERE session_id = ? AND tool_call_message_ordinal = ? AND call_index = ? AND TRIM(content) <> '' GROUP BY TRIM(COALESCE(agent_id,'')))`, q.sessionID, fact.MessageOrdinal, fact.CallIndex)
-		if err != nil {
-			return nil, err
-		}
-		found, unknown := false, true
-		for evidence.Next() {
-			var content string
-			if err := evidence.Scan(&content); err != nil {
-				evidence.Close()
-				return nil, err
-			}
-			found = true
-			unknown = unknown && signals.IsUnknownResultContent(content)
-		}
-		err = evidence.Err()
-		evidence.Close()
-		if err != nil {
-			return nil, err
-		}
-		fact.ResultContentUnknown = (found && unknown) || (!found && signals.IsUnknownResultContent(fact.ResultContent))
+		facts[i].ResultContentUnknown = signals.ToolResultContentUnknown(facts[i].ResultContent, counts[i], events[i])
 	}
 	return facts, nil
 }

@@ -203,6 +203,42 @@ func TestToolObservationsClearWhenArchiveOmitsEvidence(t *testing.T) {
 	assert.Nil(t, messages[0].ToolCalls[0].ObservedOutcome)
 }
 
+func TestToolObservationsFullReplaceWritesWithCalls(t *testing.T) {
+	for _, route := range []string{"single", "batch", "batch-transcripts"} {
+		t.Run(route, func(t *testing.T) {
+			d := testDB(t)
+			insertSession(t, d, "s1", "project-a")
+			require.NoError(t, d.Update(t.Context(), func(tx *sql.Tx) error {
+				_, err := tx.Exec(`CREATE TRIGGER reject_observation_update BEFORE UPDATE OF observed_outcome ON tool_calls BEGIN SELECT RAISE(ABORT, 'observations must accompany inserts'); END`)
+				return err
+			}))
+			messages := []Message{{SessionID: "s1", Ordinal: 3, Role: "assistant", ToolCalls: []ToolCall{{ToolName: "Grep", Category: "Grep", ObservedOutcome: new("content")}}}}
+			update := SessionSignalUpdate{ToolObservations: []ToolObservation{{MessageOrdinal: 3, Outcome: "empty", Repeat: "none", SequenceEnding: new("abandoned")}}}
+			if route == "single" {
+				require.NoError(t, d.ReplaceSessionContent(t.Context(), "s1", messages, update, nil))
+			} else {
+				if route == "batch-transcripts" {
+					d.SetArchiveContent(config.ArchiveContentTranscripts)
+				}
+				session, err := d.GetSessionFull(t.Context(), "s1")
+				require.NoError(t, err)
+				result, err := d.WriteSessionBatchContext(t.Context(), []SessionBatchWrite{{Session: *session, Messages: messages, Signals: update, ReplaceMessages: true}})
+				require.NoError(t, err)
+				require.Empty(t, result.Errors)
+				require.Equal(t, 1, result.WrittenSessions)
+			}
+			stored, err := d.GetAllMessages(t.Context(), "s1")
+			require.NoError(t, err)
+			require.Len(t, stored, 1)
+			if route == "batch-transcripts" {
+				assert.Nil(t, stored[0].ToolCalls[0].ObservedOutcome)
+			} else {
+				assert.Equal(t, new("empty"), stored[0].ToolCalls[0].ObservedOutcome)
+				assert.Equal(t, new("abandoned"), stored[0].ToolCalls[0].SequenceEnding)
+			}
+		})
+	}
+}
 func TestToolObservationDeltaPointUpdatesAndRollback(t *testing.T) {
 	d := testDB(t)
 	seedToolRateFixture(t, d)

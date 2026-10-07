@@ -522,7 +522,7 @@ func buildSessionToolSequences(
 	session *db.Session,
 	rows []signals.ToolCallRow,
 ) sessionToolSequencesResponse {
-	extracted := signals.ExtractToolSequences(rows, session.TerminationStatus != nil && (*session.TerminationStatus == string(parser.TerminationClean) || *session.TerminationStatus == string(parser.TerminationAwaitingUser)))
+	extracted := signals.ExtractToolSequences(rows, signals.SessionComplete(session.TerminationStatus))
 	response := sessionToolSequencesResponse{
 		SessionID:      session.ID,
 		TotalToolCalls: len(extracted.Calls),

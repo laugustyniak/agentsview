@@ -3,8 +3,45 @@ package signals
 import (
 	"encoding/json/jsontext"
 	json "encoding/json/v2"
+	"slices"
 	"strings"
 )
+
+func SessionComplete(status *string) bool {
+	return status != nil && (*status == "clean" || *status == "awaiting_user")
+}
+
+type ResultContentEvidence struct {
+	AgentID string
+	Content string
+}
+
+// ToolResultContentUnknown accepts all events or the latest nonempty event per agent.
+func ToolResultContentUnknown(summary string, eventCount int, events []ResultContentEvidence) bool {
+	if eventCount == 0 {
+		return IsUnknownResultContent(summary)
+	}
+	if eventCount == 1 {
+		return IsUnknownResultContent(events[0].Content)
+	}
+	seen := make(map[string]bool)
+	found := false
+	for _, event := range slices.Backward(events) {
+		if strings.TrimSpace(event.Content) == "" {
+			continue
+		}
+		agent := strings.TrimSpace(event.AgentID)
+		if seen[agent] {
+			continue
+		}
+		seen[agent] = true
+		if !IsUnknownResultContent(event.Content) {
+			return false
+		}
+		found = true
+	}
+	return found
+}
 
 func IsUnknownResultContent(content string) bool {
 	content = strings.TrimSpace(content)
