@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 )
@@ -234,6 +235,45 @@ func (db *DB) UpdateToolObservations(ctx context.Context, sessionID string, obse
 	defer func() { _ = tx.Rollback() }()
 	if db.ArchiveContent().OmitsToolContent() {
 		observations = []ToolObservation{}
+	}
+	if observations == nil {
+		return nil
+	}
+	requested := make(map[ToolCallPosition][3]sql.NullString, len(observations))
+	for _, fact := range observations {
+		values := [3]sql.NullString{{String: fact.Outcome, Valid: true}, {String: fact.Repeat, Valid: true}, {}}
+		if fact.SequenceEnding != nil {
+			values[2] = sql.NullString{String: *fact.SequenceEnding, Valid: true}
+		}
+		requested[ToolCallPosition{MessageOrdinal: fact.MessageOrdinal, CallIndex: fact.CallIndex}] = values
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT m.ordinal, tc.call_index, tc.observed_outcome, tc.observed_repeat, tc.sequence_ending FROM tool_calls tc JOIN messages m ON m.id=tc.message_id AND m.session_id=tc.session_id WHERE tc.session_id=?`, sessionID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	changed := false
+	for rows.Next() {
+		var ordinal int
+		var callIndex sql.NullInt64
+		var stored [3]sql.NullString
+		if err := rows.Scan(&ordinal, &callIndex, &stored[0], &stored[1], &stored[2]); err != nil {
+			return err
+		}
+		var wanted [3]sql.NullString
+		if callIndex.Valid {
+			wanted = requested[ToolCallPosition{MessageOrdinal: ordinal, CallIndex: int(callIndex.Int64)}]
+		}
+		changed = changed || stored != wanted
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !changed {
+		return nil
 	}
 	if err := updateToolObservationsTx(tx, sessionID, observations); err != nil {
 		return err

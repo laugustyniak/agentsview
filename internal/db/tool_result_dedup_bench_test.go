@@ -161,6 +161,38 @@ func BenchmarkRecallEvidenceWindowSingleEventCallsColdPools(b *testing.B) {
 }
 
 func BenchmarkToolCallResultStateFixedAgent(b *testing.B) {
+	for _, mixed := range []bool{false, true} {
+		b.Run(fmt.Sprintf("sole1MiB/mixed%t", mixed), func(b *testing.B) {
+			d := testDB(b)
+			require.NoError(b, d.UpsertSession(b.Context(), Session{ID: "sole", Project: "bench", Machine: "local", Agent: "codex"}))
+			messages := []Message{{SessionID: "sole", Ordinal: 0, Role: "assistant", ToolCalls: []ToolCall{{ToolName: "Read", ResultContent: "summary", ResultEvents: []ToolResultEvent{{Content: strings.Repeat("x", 1<<20)}}}}}}
+			positions := []ToolCallPosition{{}}
+			if mixed {
+				messages = append(messages, Message{SessionID: "sole", Ordinal: 1, Role: "assistant", ToolCalls: []ToolCall{{ToolName: "Read", ResultContent: "summary", ResultEvents: []ToolResultEvent{{Content: "[image]"}, {EventIndex: 1, Content: "text"}}}}})
+				positions = append(positions, ToolCallPosition{MessageOrdinal: 1})
+			}
+			require.NoError(b, d.InsertMessages(b.Context(), messages))
+			tx, err := d.getWriter().Begin(b.Context())
+			require.NoError(b, err)
+			for _, position := range positions {
+				require.NoError(b, ensureToolCallAgentStateTx(b.Context(), tx, "sole", position))
+			}
+			require.NoError(b, tx.Commit())
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				tx, err := d.getWriter().Begin(b.Context())
+				require.NoError(b, err)
+				facts, err := (signalTxQuery{tx: tx, sessionID: "sole"}).ToolCallsByPosition(b.Context(), positions)
+				require.NoError(b, err)
+				require.Len(b, facts, len(positions))
+				for _, fact := range facts {
+					require.False(b, fact.ResultContentUnknown)
+				}
+				require.NoError(b, tx.Rollback())
+			}
+		})
+	}
 	for _, count := range []int{100, 10000} {
 		for _, blank := range []bool{false, true} {
 			firstSizes := []int{0}

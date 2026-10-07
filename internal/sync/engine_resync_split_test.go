@@ -191,11 +191,15 @@ func TestResyncBuildThenSwapMatchesResyncAll(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, messages[0].ToolCalls[0].ObservedOutcome)
 	}
+	require.NoError(t, database.UpdateToolObservations(t.Context(), "keep1", []db.ToolObservation{{Outcome: "empty", Repeat: "none", SequenceEnding: new("recovered")}, {MessageOrdinal: 1, Outcome: "content", Repeat: "none"}}))
 	require.NoError(t, database.SoftDeleteSession(t.Context(), "keep1"))
 	assertObservations := func(d *db.DB) {
 		for _, id := range []string{"orphan", "keep1"} {
 			session, err := d.GetSessionFull(t.Context(), id)
 			require.NoError(t, err)
+			if id == "keep1" {
+				assert.Nil(t, session.LocalModifiedAt, "unchanged copied facts must not publish a timestamp")
+			}
 			assert.Equal(t, new(94), session.HealthScore)
 			assert.Equal(t, 2, session.ShortPromptCount)
 			assert.Equal(t, 3, session.MissingVerificationCount)

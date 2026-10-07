@@ -424,38 +424,44 @@ func (q signalTxQuery) toolCallsByPositionChunk(
 		return nil, err
 	}
 	index := make(map[ToolCallPosition]int, len(facts))
-	for i, fact := range facts {
-		index[ToolCallPosition{MessageOrdinal: fact.MessageOrdinal, CallIndex: fact.CallIndex}] = i
-	}
+	multiple := make([]ToolCallPosition, 0, len(facts))
+	args = args[:0]
 	for i, fact := range facts {
 		if counts[i] > 1 {
-			if err := ensureToolCallAgentStateTx(ctx, q.tx, q.sessionID, ToolCallPosition{MessageOrdinal: fact.MessageOrdinal, CallIndex: fact.CallIndex}); err != nil {
+			position := ToolCallPosition{MessageOrdinal: fact.MessageOrdinal, CallIndex: fact.CallIndex}
+			multiple = append(multiple, position)
+			index[position] = i
+			args = append(args, position.MessageOrdinal, position.CallIndex)
+			if err := ensureToolCallAgentStateTx(ctx, q.tx, q.sessionID, position); err != nil {
 				return nil, err
 			}
 		}
 	}
-	evidence, err := q.tx.QueryContext(ctx, `
-		WITH wanted(message_ordinal, call_index) AS (VALUES `+multiRowPlaceholders(len(positions), 2)+`)
+	if len(multiple) > 0 {
+		args = append(args, q.sessionID)
+		evidence, err := q.tx.QueryContext(ctx, `
+		WITH wanted(message_ordinal, call_index) AS (VALUES `+multiRowPlaceholders(len(multiple), 2)+`)
 		SELECT s.message_ordinal,s.call_index,s.agent_id,e.content
 		FROM wanted JOIN tool_call_occurrence_agent_state s ON s.message_ordinal=wanted.message_ordinal AND s.call_index=wanted.call_index
 		JOIN tool_result_events e ON e.session_id=s.session_id AND e.tool_call_message_ordinal=s.message_ordinal AND e.call_index=s.call_index AND e.event_index=s.latest_evidence_event_index
 		WHERE s.session_id=?`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer evidence.Close()
-	for evidence.Next() {
-		var position ToolCallPosition
-		var event signals.ResultContentEvidence
-		if err := evidence.Scan(&position.MessageOrdinal, &position.CallIndex, &event.AgentID, &event.Content); err != nil {
+		if err != nil {
 			return nil, err
 		}
-		if i, ok := index[position]; ok && counts[i] > 1 {
-			events[i] = append(events[i], event)
+		defer evidence.Close()
+		for evidence.Next() {
+			var position ToolCallPosition
+			var event signals.ResultContentEvidence
+			if err := evidence.Scan(&position.MessageOrdinal, &position.CallIndex, &event.AgentID, &event.Content); err != nil {
+				return nil, err
+			}
+			if i, ok := index[position]; ok {
+				events[i] = append(events[i], event)
+			}
 		}
-	}
-	if err := evidence.Err(); err != nil {
-		return nil, err
+		if err := evidence.Err(); err != nil {
+			return nil, err
+		}
 	}
 	for i := range facts {
 		facts[i].ResultContentUnknown = signals.ToolResultContentUnknown(facts[i].ResultContent, counts[i], events[i])
