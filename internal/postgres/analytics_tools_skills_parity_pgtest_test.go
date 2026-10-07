@@ -4,6 +4,8 @@ package postgres
 
 import (
 	"database/sql"
+	"encoding/json/v2"
+	"os"
 	"testing"
 	"time"
 
@@ -401,27 +403,26 @@ func TestToolEffectivenessSQLitePGParity(t *testing.T) {
 	call := func(id string, ordinal int, ts, tool, model, input, result string) db.Message {
 		return db.Message{SessionID: id, Ordinal: ordinal, Timestamp: ts, Role: "assistant", Model: model, HasToolUse: true, ToolCalls: []db.ToolCall{{SessionID: id, ToolName: tool, Category: tool, InputJSON: input, ResultContent: result}}}
 	}
-	cases := []struct {
-		id       string
-		status   *string
-		messages []db.Message
-	}{
-		{"recovered", new("clean"), []db.Message{call("recovered", 2, "2025-06-01T23:59:00Z", "Grep", "model-a", `{"pattern":"alpha"}`, "No matches found"), call("recovered", 4, "2025-06-02T00:01:00Z", "Grep", "model-b", `{"pattern":"alpha"}`, "No matches found"), call("recovered", 5, "2025-06-02T00:02:00Z", "Read", "model-b", `{}`, "content")}},
-		{"abandoned", new("clean"), []db.Message{call("abandoned", 0, "2025-06-02T01:00:00Z", "Grep", "model-b", `{}`, "No matches found")}},
-		{"open", nil, []db.Message{call("open", 0, "2025-06-02T02:00:00Z", "Grep", "model-b", `{}`, "No matches found")}},
-		{"unknown", new("clean"), []db.Message{call("unknown", 0, "2025-06-02T03:00:00Z", "Grep", "model-b", `{"pattern":"alpha"}`, "No matches found"), call("unknown", 1, "2025-06-02T03:01:00Z", "Grep", "model-b", `{ "pattern": "alpha" }`, "[image]")}},
-		{"legacy", nil, []db.Message{call("legacy", 0, "2025-06-02T04:00:00Z", "Grep", "model-b", `{}`, "content")}},
-		{"successful", new("clean"), []db.Message{call("successful", 0, "2025-06-02T05:00:00Z", "Grep", "model-a", `{"pattern":"alpha"}`, "matches"), call("successful", 1, "2025-06-02T05:01:00Z", "Grep", "model-a", `{"pattern":"alpha"}`, "matches"), call("successful", 2, "2025-06-02T05:02:00Z", "Grep", "model-a", `{ "pattern": "alpha" }`, "matches"), call("successful", 3, "2025-06-02T05:03:00Z", "Grep", "model-a", `{"pattern":"beta"}`, "No matches found"), call("successful", 4, "2025-06-02T05:04:00Z", "Grep", "model-a", `{"pattern":"beta"}`, "No matches found"), call("successful", 5, "2025-06-02T05:05:00Z", "Read", "model-a", `{}`, "content")}},
-	}
+	data, err := os.ReadFile("../db/testdata/tool_effectiveness.json")
+	require.NoError(t, err)
+	var cases []db.SessionBatchWrite
+	require.NoError(t, json.Unmarshal(data, &cases))
+	cases = append(cases, db.SessionBatchWrite{Session: db.Session{ID: "successful", Project: "project-a", StartedAt: new("2025-06-01T23:59:00Z"), TerminationStatus: new("clean"), UserMessageCount: 2}, Messages: []db.Message{call("successful", 0, "2025-06-02T05:00:00Z", "Grep", "model-a", `{"pattern":"alpha"}`, "matches"), call("successful", 1, "2025-06-02T05:01:00Z", "Grep", "model-a", `{"pattern":"alpha"}`, "matches"), call("successful", 2, "2025-06-02T05:02:00Z", "Grep", "model-a", `{ "pattern": "alpha" }`, "matches"), call("successful", 3, "2025-06-02T05:03:00Z", "Grep", "model-a", `{"pattern":"beta"}`, "No matches found"), call("successful", 4, "2025-06-02T05:04:00Z", "Grep", "model-a", `{"pattern":"beta"}`, "No matches found"), call("successful", 5, "2025-06-02T05:05:00Z", "Read", "model-a", `{}`, "content")}})
 	for _, fixture := range cases {
-		session := db.Session{ID: fixture.id, Project: "project-a", Agent: "claude", Machine: "fixture", StartedAt: new("2025-06-01T23:59:00Z"), TerminationStatus: fixture.status, MessageCount: len(fixture.messages), UserMessageCount: 2}
+		session := fixture.Session
+		session.Agent, session.Machine, session.MessageCount = "claude", "fixture", len(fixture.Messages)
+		for i := range fixture.Messages {
+			for j := range fixture.Messages[i].ToolCalls {
+				fixture.Messages[i].ToolCalls[j].SessionID = session.ID
+			}
+		}
 		require.NoError(t, local.UpsertSession(t.Context(), session))
-		if fixture.id == "legacy" {
-			require.NoError(t, local.InsertMessages(t.Context(), fixture.messages))
+		if session.ID == "legacy" {
+			require.NoError(t, local.InsertMessages(t.Context(), fixture.Messages))
 			continue
 		}
-		update, findings := ingest.ComputeSignalsAndSecrets(session, fixture.messages)
-		require.NoError(t, local.ReplaceSessionContent(t.Context(), fixture.id, fixture.messages, update, findings))
+		update, findings := ingest.ComputeSignalsAndSecrets(session, fixture.Messages)
+		require.NoError(t, local.ReplaceSessionContent(t.Context(), session.ID, fixture.Messages, update, findings))
 	}
 	for _, fixture := range []struct {
 		id, category, model string

@@ -2,7 +2,9 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json/v2"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,25 +14,25 @@ import (
 
 func seedToolRateFixture(t *testing.T, d *DB) {
 	t.Helper()
-	for _, id := range []string{"recovered", "abandoned", "open", "unknown", "legacy"} {
-		insertSession(t, d, id, "project-a", func(s *Session) { s.StartedAt = new("2025-06-01T23:59:00Z"); s.UserMessageCount = 2 })
+	data, err := os.ReadFile("testdata/tool_effectiveness.json")
+	require.NoError(t, err)
+	var cases []SessionBatchWrite
+	require.NoError(t, json.Unmarshal(data, &cases))
+	var messages []Message
+	for _, fixture := range cases {
+		id := fixture.Session.ID
+		insertSession(t, d, id, fixture.Session.Project, func(s *Session) {
+			s.StartedAt = fixture.Session.StartedAt
+			s.UserMessageCount = fixture.Session.UserMessageCount
+		})
+		for _, call := range fixture.Messages {
+			m := asstMsgAt(id, call.Ordinal, "tool", call.Timestamp)
+			m.Model = call.Model
+			m.ToolCalls = []ToolCall{{SessionID: id, ToolName: call.ToolCalls[0].ToolName, Category: call.ToolCalls[0].Category}}
+			messages = append(messages, m)
+		}
 	}
-	call := func(sid string, ordinal int, timestamp, tool, model string) Message {
-		m := asstMsgAt(sid, ordinal, "tool", timestamp)
-		m.Model = model
-		m.ToolCalls = []ToolCall{{SessionID: sid, ToolName: tool, Category: tool}}
-		return m
-	}
-	insertMessages(t, d,
-		call("recovered", 2, "2025-06-01T23:59:00Z", "Grep", "model-a"),
-		call("recovered", 4, "2025-06-02T00:01:00Z", "Grep", "model-b"),
-		call("recovered", 5, "2025-06-02T00:02:00Z", "Read", "model-b"),
-		call("abandoned", 0, "2025-06-02T01:00:00Z", "Grep", "model-b"),
-		call("open", 0, "2025-06-02T02:00:00Z", "Grep", "model-b"),
-		call("unknown", 0, "2025-06-02T03:00:00Z", "Grep", "model-b"),
-		call("unknown", 1, "2025-06-02T03:01:00Z", "Grep", "model-b"),
-		call("legacy", 0, "2025-06-02T04:00:00Z", "Grep", "model-b"),
-	)
+	insertMessages(t, d, messages...)
 	facts := map[string][]ToolObservation{
 		"recovered": {{MessageOrdinal: 2, Outcome: "empty", Repeat: "none", SequenceEnding: new("recovered")}, {MessageOrdinal: 4, Outcome: "empty", Repeat: "identical"}, {MessageOrdinal: 5, Outcome: "content", Repeat: "none"}},
 		"abandoned": {{Outcome: "empty", Repeat: "none", SequenceEnding: new("abandoned")}},

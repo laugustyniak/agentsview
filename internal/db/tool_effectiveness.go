@@ -47,9 +47,9 @@ func ToolEffectivenessSQL(alias, versionColumn string) string {
 	predicates := []string{
 		alias + ".observed_outcome IS NOT NULL",
 		alias + ".observed_outcome IN ('empty','content','errored')",
-		alias + ".observed_outcome = 'empty'",
-		alias + ".observed_repeat IN ('identical','near_identical')",
-		alias + ".sequence_ending = 'recovered'",
+		ToolMetricPredicate(alias, "tool_empty_rate"),
+		ToolMetricPredicate(alias, "tool_repeat_rate"),
+		ToolMetricPredicate(alias, "tool_recovery_rate"),
 		alias + ".sequence_ending = 'abandoned'",
 		alias + ".sequence_ending = 'open'",
 		alias + ".sequence_ending = 'unknown'",
