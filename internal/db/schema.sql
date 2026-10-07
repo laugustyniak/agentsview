@@ -1418,6 +1418,7 @@ CREATE TABLE IF NOT EXISTS tool_call_occurrence_agent_state (
     agent_id           TEXT NOT NULL,
     first_event_index  INTEGER NOT NULL,
     latest_event_index INTEGER NOT NULL,
+    latest_evidence_event_index INTEGER DEFAULT -1,
     PRIMARY KEY (session_id, message_ordinal, call_index, agent_id)
 );
 

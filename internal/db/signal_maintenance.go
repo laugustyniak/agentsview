@@ -377,7 +377,9 @@ func (q signalTxQuery) toolCallsByPositionChunk(
 		             AND tre.call_index = COALESCE(tc.call_index, 0)
 		           ORDER BY tre.event_index DESC, tre.id DESC
 		           LIMIT 1
-		       ), '')
+		       ), ''),
+		       (SELECT COUNT(*) FROM (SELECT 1 FROM tool_result_events tre WHERE tre.session_id=tc.session_id AND tre.tool_call_message_ordinal=m.ordinal AND tre.call_index=COALESCE(tc.call_index,0) LIMIT 2)),
+		       COALESCE((SELECT tre.content FROM tool_result_events tre WHERE tre.session_id=tc.session_id AND tre.tool_call_message_ordinal=m.ordinal AND tre.call_index=COALESCE(tc.call_index,0) LIMIT 1), '')
 		FROM wanted
 		JOIN messages m ON m.ordinal = wanted.message_ordinal
 		JOIN tool_calls tc ON tc.message_id = m.id
@@ -392,17 +394,27 @@ func (q signalTxQuery) toolCallsByPositionChunk(
 	}
 	defer rows.Close()
 	var facts []ToolCallSignalFact
+	var counts []int
+	var events [][]signals.ResultContentEvidence
 	for rows.Next() {
 		var f ToolCallSignalFact
+		var count int
+		var soleContent string
 		if err := rows.Scan(
 			&f.MessageOrdinal, &f.CallIndex, &f.ToolName, &f.Category,
-			&f.InputJSON, &f.ResultContent, &f.ResultContentLength, &f.ToolUseID, &f.EventStatus,
+			&f.InputJSON, &f.ResultContent, &f.ResultContentLength, &f.ToolUseID, &f.EventStatus, &count, &soleContent,
 		); err != nil {
 			return nil, fmt.Errorf(
 				"scanning tool call fact %s: %w", q.sessionID, err,
 			)
 		}
 		facts = append(facts, f)
+		counts = append(counts, count)
+		var evidence []signals.ResultContentEvidence
+		if count == 1 {
+			evidence = []signals.ResultContentEvidence{{Content: soleContent}}
+		}
+		events = append(events, evidence)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -414,40 +426,31 @@ func (q signalTxQuery) toolCallsByPositionChunk(
 	for i, fact := range facts {
 		index[ToolCallPosition{MessageOrdinal: fact.MessageOrdinal, CallIndex: fact.CallIndex}] = i
 	}
-	// SQLite's default TRIM omits the whitespace recognized by Go's TrimSpace.
-	const whitespace = "\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+	for i, fact := range facts {
+		if counts[i] > 1 {
+			if err := ensureToolCallAgentStateTx(ctx, q.tx, q.sessionID, ToolCallPosition{MessageOrdinal: fact.MessageOrdinal, CallIndex: fact.CallIndex}); err != nil {
+				return nil, err
+			}
+		}
+	}
 	evidence, err := q.tx.QueryContext(ctx, `
-		WITH wanted(message_ordinal, call_index) AS (
-			VALUES `+multiRowPlaceholders(len(positions), 2)+`
-		), ranked AS (
-			SELECT tre.tool_call_message_ordinal AS ordinal, tre.call_index,
-			       COALESCE(tre.agent_id, '') AS agent_id, tre.content, tre.event_index, tre.id,
-			       COUNT(*) OVER (PARTITION BY tre.tool_call_message_ordinal, tre.call_index) AS event_count,
-			       ROW_NUMBER() OVER (
-			           PARTITION BY tre.tool_call_message_ordinal, tre.call_index, TRIM(COALESCE(tre.agent_id, ''), '`+whitespace+`')
-			           ORDER BY (TRIM(tre.content, '`+whitespace+`') <> '') DESC, tre.event_index DESC, tre.id DESC
-			       ) AS rank
-			FROM wanted JOIN tool_result_events tre
-			  ON tre.tool_call_message_ordinal = wanted.message_ordinal AND tre.call_index = wanted.call_index
-			WHERE tre.session_id = ?
-		)
-		SELECT ordinal, call_index, agent_id, content, event_count FROM ranked WHERE rank = 1 ORDER BY event_index, id`, args...)
+		WITH wanted(message_ordinal, call_index) AS (VALUES `+multiRowPlaceholders(len(positions), 2)+`)
+		SELECT s.message_ordinal,s.call_index,s.agent_id,e.content
+		FROM wanted JOIN tool_call_occurrence_agent_state s ON s.message_ordinal=wanted.message_ordinal AND s.call_index=wanted.call_index
+		JOIN tool_result_events e ON e.session_id=s.session_id AND e.tool_call_message_ordinal=s.message_ordinal AND e.call_index=s.call_index AND e.event_index=s.latest_evidence_event_index
+		WHERE s.session_id=?`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer evidence.Close()
-	events := make([][]signals.ResultContentEvidence, len(facts))
-	counts := make([]int, len(facts))
 	for evidence.Next() {
 		var position ToolCallPosition
 		var event signals.ResultContentEvidence
-		var count int
-		if err := evidence.Scan(&position.MessageOrdinal, &position.CallIndex, &event.AgentID, &event.Content, &count); err != nil {
+		if err := evidence.Scan(&position.MessageOrdinal, &position.CallIndex, &event.AgentID, &event.Content); err != nil {
 			return nil, err
 		}
-		if i, ok := index[position]; ok {
+		if i, ok := index[position]; ok && counts[i] > 1 {
 			events[i] = append(events[i], event)
-			counts[i] = count
 		}
 	}
 	if err := evidence.Err(); err != nil {

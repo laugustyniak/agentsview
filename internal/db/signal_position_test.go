@@ -21,6 +21,10 @@ func TestToolCallsByPositionResultEvidence(t *testing.T) {
 		{"[image]", nil, true, 7},
 		{"", []ToolResultEvent{{Content: "content"}, {Content: "[image]"}, {Content: ""}}, true, 0},
 		{"", nil, false, 7},
+		{"", []ToolResultEvent{{Content: ""}}, false, 0},
+		{"", []ToolResultEvent{{Content: ""}, {Content: "\u00a0"}}, false, 0},
+		{"", []ToolResultEvent{{AgentID: " a ", Content: "content"}, {AgentID: "a", Content: "[image]"}, {AgentID: "a", Content: ""}}, true, 0},
+		{"", []ToolResultEvent{{AgentID: "a", Content: "[image]"}, {AgentID: "b", Content: "text"}}, false, 0},
 	}
 	positions := make([]ToolCallPosition, len(cases))
 	for i, fixture := range cases {

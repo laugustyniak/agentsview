@@ -159,3 +159,44 @@ func BenchmarkRecallEvidenceWindowSingleEventCallsColdPools(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkToolCallResultStateFixedAgent(b *testing.B) {
+	for _, count := range []int{100, 10000} {
+		for _, blank := range []bool{false, true} {
+			b.Run(fmt.Sprintf("events%d/blank%t", count, blank), func(b *testing.B) {
+				d := testDB(b)
+				require.NoError(b, d.UpsertSession(b.Context(), Session{ID: "state", Project: "bench", Machine: "local", Agent: "codex"}))
+				events := make([]ToolResultEvent, count)
+				for i := range events {
+					events[i] = ToolResultEvent{AgentID: "agent-a", EventIndex: i}
+					if !blank {
+						events[i].Content = fmt.Sprintf("result %d", i)
+					}
+					PrepareToolResultEvent(&events[i])
+				}
+				require.NoError(b, d.InsertMessages(b.Context(), []Message{{SessionID: "state", Ordinal: 0, Role: "assistant", ToolCalls: []ToolCall{{ToolUseID: "call", ToolName: "wait_agent", ResultEvents: events}}}}))
+				tx, err := d.getWriter().Begin(b.Context())
+				require.NoError(b, err)
+				require.NoError(b, ensureToolCallAgentStateTx(b.Context(), tx, "state", ToolCallPosition{}))
+				require.NoError(b, tx.Commit())
+				content := "next result"
+				if blank {
+					content = "\t"
+				}
+				b.ResetTimer()
+				for b.Loop() {
+					tx, err := d.getWriter().Begin(b.Context())
+					require.NoError(b, err)
+					changed, _, err := applyToolCallResultUpdateTx(b.Context(), tx, "state", ToolCallResultUpdate{ToolUseID: "call", Events: []ToolResultEvent{{AgentID: "agent-a", Content: content}}}, nil, "", "")
+					require.NoError(b, err)
+					require.True(b, changed)
+					facts, err := (signalTxQuery{tx: tx, sessionID: "state"}).ToolCallsByPosition(b.Context(), []ToolCallPosition{{}})
+					require.NoError(b, err)
+					require.Len(b, facts, 1)
+					require.False(b, facts[0].ResultContentUnknown)
+					require.NoError(b, tx.Rollback())
+				}
+			})
+		}
+	}
+}

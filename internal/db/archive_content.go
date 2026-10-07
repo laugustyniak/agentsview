@@ -548,6 +548,7 @@ func dropCopiedToolContentTx(
 		{"tool payloads", `
 			UPDATE tool_calls SET observed_outcome = NULL, observed_repeat = NULL, sequence_ending = NULL, input_json = NULL, result_content = NULL
 			WHERE session_id` + inCopied},
+		{"tool result coordinates", `DELETE FROM tool_call_occurrence_agent_state WHERE session_id` + inCopied},
 		{"tool result events", `
 			UPDATE tool_result_events SET content = ''
 			WHERE session_id` + inCopied},
@@ -645,6 +646,7 @@ func compactCopiedSessionsForUsageTx(
 		label string
 		sql   string
 	}{
+		{"tool result coordinates", `DELETE FROM tool_call_occurrence_agent_state WHERE session_id` + inCopied},
 		{"tool result events", `
 			DELETE FROM tool_result_events WHERE session_id` + inCopied},
 		{"non-delegation tool calls", `

@@ -2597,6 +2597,10 @@ func schemaColumnMigrations() []schemaColumnMigration {
 			"ALTER TABLE tool_calls ADD COLUMN file_path TEXT",
 		},
 		{
+			"tool_call_occurrence_agent_state", "latest_evidence_event_index",
+			"ALTER TABLE tool_call_occurrence_agent_state ADD COLUMN latest_evidence_event_index INTEGER DEFAULT -1",
+		},
+		{
 			"tool_calls", "observed_outcome",
 			"ALTER TABLE tool_calls ADD COLUMN observed_outcome TEXT",
 		},
