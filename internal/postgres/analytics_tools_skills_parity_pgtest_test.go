@@ -544,7 +544,7 @@ func TestToolRateCategoryNumeratorSQLitePGParity(t *testing.T) {
 		assert.Equal(t, 4, *first.Sessions[0].MessageOrdinal)
 		assert.Equal(t, 1, first.Sessions[0].SignalTotal)
 		if filter.Model == "" {
-			assert.Equal(t, 2, first.Total)
+			assert.Equal(t, new(2), first.Total)
 			require.NotNil(t, first.NextOffset)
 			filter.EvidenceOffset = *first.NextOffset
 			second, err := local.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 1)

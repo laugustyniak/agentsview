@@ -78,7 +78,7 @@ func TestToolEffectivenessFilteredRatesAndEvidence(t *testing.T) {
 	f := AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC", ToolName: "Grep", ToolCategory: "Grep"}
 	first, err := d.GetAnalyticsSignalSessions(t.Context(), f, "tool_empty_rate", 1)
 	require.NoError(t, err)
-	assert.Equal(t, 4, first.Total)
+	assert.Equal(t, new(4), first.Total)
 	require.Len(t, first.Sessions, 1)
 	require.NotNil(t, first.NextOffset)
 	f.EvidenceOffset = *first.NextOffset

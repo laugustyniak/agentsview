@@ -2481,5 +2481,6 @@
     }
   ],
   "analytics_tool_history_note": "過去のセッションは未分析の場合があります。agentsview sync --full を実行すると過去の率を計算できます。",
+  "analytics_tool_latest_matching_call": "最後に一致した呼び出し: {date}",
   "analytics_tool_matching_calls": "該当する呼び出し: {count}"
 }

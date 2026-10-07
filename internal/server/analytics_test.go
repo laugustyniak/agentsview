@@ -475,11 +475,11 @@ func TestAnalyticsToolEvidenceOptionalCategory(t *testing.T) {
 	for _, tc := range []struct {
 		query string
 		total int
-	}{{"&tool_name=readFile", 2}, {"&tool_category=Read", 2}, {"&tool_name=readFile&tool_category=MCP", 1}} {
+	}{{"&tool_name=readFile", 2}, {"&tool_category=Read", 2}, {"&tool_name=readFile&tool_category=MCP", 1}, {"&tool_name=absent", 0}} {
 		w := te.get(t, "/api/v1/analytics/signal-sessions?signal=tool_empty_rate&from=2026-04-26&to=2026-04-26"+tc.query)
 		assertStatus(t, w, http.StatusOK)
 		got := decode[db.SignalSessionsResponse](t, w)
-		assert.Equal(t, tc.total, got.Total, tc.query)
+		assert.Equal(t, new(tc.total), got.Total, tc.query)
 		document := decode[map[string]any](t, w)
 		for _, row := range document["sessions"].([]any) {
 			for _, key := range []string{"failure_signals", "retries", "edit_churn", "is_automated", "outcome", "excerpt"} {
@@ -490,15 +490,21 @@ func TestAnalyticsToolEvidenceOptionalCategory(t *testing.T) {
 			assert.Equal(t, new(1), session.MessageOrdinal)
 		}
 	}
-	w := te.get(t, "/api/v1/analytics/signal-sessions?signal=unstructured_start&from=2026-04-26&to=2026-04-26")
+	path := "/api/v1/analytics/signal-sessions?signal=unstructured_start&from=2026-04-26&to=2026-04-26"
+	w := te.get(t, path+"&offset=0")
 	assertStatus(t, w, http.StatusOK)
 	quality := decode[map[string]any](t, w)
+	assert.NotContains(t, quality, "total")
+	assert.NotContains(t, quality, "next_offset")
 	require.Len(t, quality["sessions"], 3)
 	for _, row := range quality["sessions"].([]any) {
 		assert.Equal(t, false, row.(map[string]any)["is_automated"])
 		for _, key := range []string{"failure_signals", "retries", "edit_churn"} {
 			assert.Equal(t, float64(0), row.(map[string]any)[key])
 		}
+	}
+	for _, query := range []string{"&offset=1", "&tool_name=readFile", "&tool_category=Read"} {
+		assertStatus(t, te.get(t, path+query), http.StatusBadRequest)
 	}
 }
 

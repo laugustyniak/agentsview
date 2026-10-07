@@ -203,7 +203,7 @@ analyzed calls divided by all calls. Sessions gain coverage when changed or duri
 `agentsview sync --full`, including archived copies whose source files are gone. Pending
 refreshes have missing coverage until the recompute commits. PostgreSQL,
 DuckDB and ClickHouse receive these observations through their normal pushes.
-Archives that omit tool content report missing coverage.
+Archives that omit tool content report missing coverage. Evidence dates show the latest matching call date.
 
 ![Tool usage](/docs/assets/generated/screenshots/tool-usage.png)
 

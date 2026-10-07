@@ -41,7 +41,7 @@
   let expanded = $state(false);
   let selectedRate = $state<{ tool: string; category: string; metric: string } | null>(null);
   let evidence = $state<SignalSessionExample[]>([]);
-  let evidenceTotal = $state(0);
+  let evidenceTotal = $state<number | undefined>();
   let nextOffset = $state<number | null>(null);
   let evidenceLoading = $state(false);
   let evidenceError = $state<string | null>(null);
@@ -61,7 +61,7 @@
     selectedRate = { tool, category, metric };
     evidenceLoading = true;
     evidenceError = null;
-    if (offset === 0) { evidence = []; evidenceTotal = 0; nextOffset = null; }
+    if (offset === 0) { evidence = []; evidenceTotal = undefined; nextOffset = null; }
     try {
       const response = await AnalyticsService.getApiV1AnalyticsSignalSessions({ ...evidenceParams, signal: metric, tool_name: tool, tool_category: category, limit: 10, offset }, { signal });
       if (!evidenceRead.isCurrent(signal)) return;
@@ -257,12 +257,12 @@
           {#if selectedRate}
             <section class="tool-evidence" aria-live="polite">
               <h4 class="section-title">{selectedRate.tool} ({selectedRate.category}) · {rateColumns.find((c) => c.metric === selectedRate?.metric)?.label}</h4>
-              <p class="rate-note">{m.analytics_tool_evidence_count({ count: evidenceTotal, countLabel: evidenceTotal.toLocaleString() })}</p>
+              {#if evidenceTotal != null}<p class="rate-note">{m.analytics_tool_evidence_count({ count: evidenceTotal, countLabel: evidenceTotal.toLocaleString() })}</p>{/if}
               {#if evidenceLoading}<p class="rate-note">{m.insights_page_loading_examples()}</p>{/if}
               {#if evidenceError}<p class="error">{evidenceError}</p><Button surface="soft" size="sm" onclick={() => loadEvidence(selectedRate!.tool, selectedRate!.category, selectedRate!.metric)}>{m.shared_retry()}</Button>{/if}
               {#each evidence as example}
                 <a class="evidence-row" href={router.buildSessionHref(example.session_id, example.message_ordinal == null ? {} : { msg: String(example.message_ordinal) })} onclick={(event) => openSession(event, example)}>
-                  {example.project || m.insights_page_unassigned_project()} · {example.agent} · {example.date} · {m.analytics_tool_matching_calls({ count: example.signal_total })}
+                  {example.project || m.insights_page_unassigned_project()} · {example.agent} · {m.analytics_tool_latest_matching_call({ date: example.date })} · {m.analytics_tool_matching_calls({ count: example.signal_total })}
                 </a>
               {/each}
               {#if nextOffset != null}<Button surface="soft" size="sm" disabled={evidenceLoading} onclick={() => loadEvidence(selectedRate!.tool, selectedRate!.category, selectedRate!.metric, nextOffset!)}>{m.analytics_tool_more_sessions()}</Button>{/if}

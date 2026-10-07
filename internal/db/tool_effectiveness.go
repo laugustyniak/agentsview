@@ -142,7 +142,7 @@ func BuildToolMetricEvidence(rows []ToolAnalyticsRow, signal string, offset, lim
 	})
 	offset = min(max(offset, 0), len(all))
 	end := min(offset+limit, len(all))
-	result := SignalSessionsResponse{Signal: signal, Sessions: all[offset:end], Total: len(all)}
+	result := SignalSessionsResponse{Signal: signal, Sessions: all[offset:end], Total: new(len(all))}
 	if end < len(all) {
 		result.NextOffset = &end
 	}

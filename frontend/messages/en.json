@@ -2493,5 +2493,6 @@
     }
   ],
   "analytics_tool_history_note": "Older sessions may be uncomputed. Run agentsview sync --full to populate historical rates.",
+  "analytics_tool_latest_matching_call": "Latest matching call: {date}",
   "analytics_tool_matching_calls": "Matching calls: {count}"
 }

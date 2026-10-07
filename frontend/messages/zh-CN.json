@@ -2409,5 +2409,6 @@
     }
   ],
   "analytics_tool_history_note": "较早的会话可能尚未分析。运行 agentsview sync --full 可补全历史比率。",
+  "analytics_tool_latest_matching_call": "最近匹配调用：{date}",
   "analytics_tool_matching_calls": "匹配调用：{count}"
 }

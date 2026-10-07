@@ -2409,5 +2409,6 @@
     }
   ],
   "analytics_tool_history_note": "이전 세션은 분석되지 않았을 수 있습니다. agentsview sync --full을 실행하여 과거 비율을 계산하세요.",
+  "analytics_tool_latest_matching_call": "최근 일치 호출: {date}",
   "analytics_tool_matching_calls": "일치하는 호출: {count}"
 }

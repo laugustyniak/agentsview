@@ -2995,7 +2995,6 @@ components:
           format: int64
           type: integer
       required:
-        - total
         - signal
         - sessions
       type: object
@@ -9539,13 +9538,13 @@ paths:
           schema:
             description: Tool name for a tool rate
             type: string
-        - description: Session evidence offset
+        - description: Session evidence offset for a tool rate
           explode: false
           in: query
           name: offset
           schema:
             default: 0
-            description: Session evidence offset
+            description: Session evidence offset for a tool rate
             format: int64
             minimum: 0
             type: integer

@@ -13,7 +13,7 @@ export type GetApiV1AnalyticsSignalSessionsParams = {
    */
   tool_name?: string;
   /**
-   * Session evidence offset
+   * Session evidence offset for a tool rate
    * @minimum 0
    */
   offset?: number;

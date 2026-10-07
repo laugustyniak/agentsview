@@ -238,6 +238,7 @@ describe("ToolUsage", () => {
     await tick();
     expect(document.body.textContent).not.toContain("stale-project");
     expect(document.body.textContent).toContain("Matching calls: 1");
+    expect(document.body.textContent).toContain("Latest matching call: 2025-06-02");
     (document.querySelector("a.evidence-row") as HTMLAnchorElement).click();
     expect(navigate).toHaveBeenCalledWith("recovered", { msg: "2" });
     unmount(component);
@@ -249,17 +250,22 @@ describe("ToolUsage", () => {
     seedRates();
     const fetch = vi
       .spyOn(AnalyticsService, "getApiV1AnalyticsSignalSessions")
-      .mockResolvedValue({ signal: "tool_empty_rate", total: 0, sessions: [] });
+      .mockResolvedValueOnce({ signal: "tool_empty_rate", total: 0, sessions: [] })
+      .mockResolvedValue({ signal: "tool_empty_rate", sessions: [] });
     const component = mount(ToolUsage, { target: document.body });
     await tick();
     (document.querySelector('[aria-label="Grep Empty rate"]') as HTMLButtonElement).click();
     await tick();
+    await tick();
+    expect(document.querySelector(".tool-evidence")?.textContent).toContain("0 sessions");
     analytics.project = "project-b";
     await tick();
     expect(fetch).toHaveBeenLastCalledWith(
       expect.objectContaining({ project: "project-b", tool_name: "Grep" }),
       expect.anything(),
     );
+    await tick();
+    expect(document.querySelector(".tool-evidence")?.textContent).not.toContain("0 sessions");
     unmount(component);
     analytics.project = "";
   });

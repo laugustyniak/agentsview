@@ -4077,7 +4077,7 @@ type SignalCalibration struct {
 // SignalSessionsResponse returns concrete sessions that triggered
 // an aggregate signal, including the best available message excerpt.
 type SignalSessionsResponse struct {
-	Total      int                    `json:"total"`
+	Total      *int                   `json:"total,omitempty"`
 	NextOffset *int                   `json:"next_offset,omitempty"`
 	Signal     string                 `json:"signal"`
 	Sessions   []SignalSessionExample `json:"sessions"`
