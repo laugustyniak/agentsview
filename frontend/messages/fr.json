@@ -2490,5 +2490,7 @@
         "countPlural=other": "{countLabel} sessions"
       }
     }
-  ]
+  ],
+  "analytics_tool_history_note": "Les anciennes sessions peuvent ne pas être analysées. Exécutez agentsview sync --full pour calculer les taux historiques.",
+  "analytics_tool_matching_calls": "Appels correspondants : {count}"
 }

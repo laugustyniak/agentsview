@@ -91,6 +91,7 @@ func queryChunkedSize(
 
 // AnalyticsFilter is the shared filter for all analytics queries.
 type AnalyticsFilter struct {
+	ToolCategory   string
 	ToolName       string
 	ToolMetric     string
 	EvidenceOffset int
@@ -3205,18 +3206,11 @@ func (db *DB) analyticsToolRows(
 				"m.model", f.Model,
 			)
 			chunkArgs = append(chunkArgs, modelArgs...)
-			if f.ToolName != "" {
+			for _, predicate := range ToolSelectionPredicates("tc", fmt.Sprintf("s.quality_signal_version = %d", CurrentQualitySignalVersion), f, func(value string) string { chunkArgs = append(chunkArgs, value); return "?" }) {
 				if modelPred != "" {
 					modelPred += " AND "
 				}
-				modelPred += "COALESCE(NULLIF(TRIM(COALESCE(tc.tool_name, '')), ''), 'Unknown') = ?"
-				chunkArgs = append(chunkArgs, f.ToolName)
-			}
-			if predicate := ToolMetricPredicate("tc", f.ToolMetric); predicate != "" {
-				if modelPred != "" {
-					modelPred += " AND "
-				}
-				modelPred += predicate + fmt.Sprintf(" AND s.quality_signal_version = %d", CurrentQualitySignalVersion)
+				modelPred += predicate
 			}
 			from, to := f.messageWindowBoundsUTC()
 			windowPred, windowArgs := analyticsMessageWindowPred("m.timestamp", from, to)

@@ -62,7 +62,6 @@ const (
 // ToolCall represents a single tool invocation stored in
 // the tool_calls table.
 type ToolCall struct {
-	StagedOutcome       *string           `json:"-"`
 	ObservedOutcome     *string           `json:"-"`
 	ObservedRepeat      *string           `json:"-"`
 	SequenceEnding      *string           `json:"-"`
@@ -1720,11 +1719,6 @@ func (db *DB) writeSessionIncremental(ctx context.Context,
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var previousTermination sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT termination_status FROM sessions WHERE id = ?`, sessionID).Scan(&previousTermination); err != nil {
-		return false, err
-	}
-	terminationChanged := previousTermination.Valid != (update.TerminationStatus != nil) || (update.TerminationStatus != nil && previousTermination.String != *update.TerminationStatus)
 	var replaced *messageRangeTotals
 	var pendingRecallRevocations recallEvidenceRevocationEvents
 	if from := update.ReplaceFromOrdinal; from != nil {
@@ -1831,7 +1825,7 @@ func (db *DB) writeSessionIncremental(ctx context.Context,
 		return false, err
 	}
 	signalsMaintained := false
-	if !db.ArchiveContent().OmitsToolContent() && !terminationChanged && update.SignalMaintainer != nil {
+	if !db.ArchiveContent().OmitsToolContent() && update.SignalMaintainer != nil {
 		delta, err := update.SignalMaintainer.MaintainTx(
 			context.Background(), signalTxQuery{
 				tx:                          tx,

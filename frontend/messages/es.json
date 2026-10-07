@@ -2493,5 +2493,7 @@
         "countPlural=other": "{countLabel} sesiones"
       }
     }
-  ]
+  ],
+  "analytics_tool_history_note": "Las sesiones anteriores pueden estar sin analizar. Ejecuta agentsview sync --full para completar las tasas históricas.",
+  "analytics_tool_matching_calls": "Llamadas coincidentes: {count}"
 }

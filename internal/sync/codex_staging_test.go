@@ -822,7 +822,7 @@ func assertCodexStagedParity(t *testing.T, uuid, content string) {
 	require.NoError(t, dbStaged.ReplaceSessionContentStaged(
 		t.Context(), rowS.ID, stagedDBMsgs, stagedSink,
 		map[string]bool{},
-		func(verdicts map[string]bool) (
+		func(verdicts map[string]db.StagedToolVerdict) (
 			db.SessionSignalUpdate, []db.SecretFinding, error,
 		) {
 			update, findings := computeSignalsAndSecretsWithContentFailures(

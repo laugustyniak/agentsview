@@ -64,18 +64,33 @@ func IsToolMetric(signal string) bool {
 	return signal == "tool_empty_rate" || signal == "tool_repeat_rate" || signal == "tool_recovery_rate"
 }
 
-// ToolMetricPredicate selects the calls included in a rate's denominator.
+// ToolMetricPredicate selects the calls behind a rate's numerator.
 func ToolMetricPredicate(alias, signal string) string {
 	switch signal {
 	case "tool_empty_rate":
-		return alias + ".observed_outcome IN ('empty','content','errored')"
+		return alias + ".observed_outcome = 'empty'"
 	case "tool_repeat_rate":
-		return alias + ".observed_outcome IS NOT NULL"
+		return alias + ".observed_repeat IN ('identical','near_identical')"
 	case "tool_recovery_rate":
-		return alias + ".sequence_ending IN ('recovered','abandoned')"
+		return alias + ".sequence_ending = 'recovered'"
 	default:
 		return ""
 	}
+}
+
+// ToolSelectionPredicates shares row identity and freshness while each store binds values.
+func ToolSelectionPredicates(alias, fresh string, f AnalyticsFilter, bind func(string) string) []string {
+	predicates := []string{}
+	if f.ToolName != "" {
+		predicates = append(predicates, "COALESCE(NULLIF(TRIM(COALESCE("+alias+".tool_name, '')), ''), 'Unknown') = "+bind(f.ToolName))
+	}
+	if f.ToolCategory != "" || (f.ToolName != "" && IsToolMetric(f.ToolMetric)) {
+		predicates = append(predicates, alias+".category = "+bind(f.ToolCategory))
+	}
+	if predicate := ToolMetricPredicate(alias, f.ToolMetric); predicate != "" {
+		predicates = append(predicates, predicate, fresh)
+	}
+	return predicates
 }
 
 // BuildToolMetricEvidence returns distinct contributing sessions in stable order.
@@ -85,12 +100,12 @@ func BuildToolMetricEvidence(rows []ToolAnalyticsRow, signal string, offset, lim
 	}
 	examples := make(map[string]SignalSessionExample)
 	for _, row := range rows {
-		count := row.AnalyzedCalls
+		count := row.RepeatedCalls
 		if signal == "tool_empty_rate" {
-			count = row.KnownOutcomeCalls
+			count = row.EmptyCalls
 		}
 		if signal == "tool_recovery_rate" {
-			count = row.RecoveredSequences + row.AbandonedSequences
+			count = row.RecoveredSequences
 		}
 		if count == 0 {
 			continue

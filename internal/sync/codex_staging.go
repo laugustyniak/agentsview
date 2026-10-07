@@ -77,10 +77,9 @@ type codexStagingSink struct {
 	// contentFailures records per-call content-failure verdicts captured
 	// during ingestion for sole events or publication for multi-event
 	// summaries, so the engine can reuse them in the signal pass.
-	contentOutcomes   map[string]string
 	toolNameByCallKey map[string]string
 	statusByCallKey   map[string]string
-	contentFailures   map[string]bool
+	contentFailures   map[string]db.StagedToolVerdict
 	// stageErr is the sticky first scratch failure. Once set, staging is
 	// unrecoverable for this parse: events are no longer accepted and the
 	// publish must fail, so a disk-full or I/O error can never commit a
@@ -616,16 +615,17 @@ func (s *codexStagingSink) AppendToolResultEvent(ctx context.Context,
 		s.recordContentOutcome(stageKey, summary, ev.Status)
 		if !s.disableSignals {
 			if s.contentFailures == nil {
-				s.contentFailures = make(map[string]bool)
+				s.contentFailures = make(map[string]db.StagedToolVerdict)
 			}
-			s.contentFailures[stageKey] = signals.IsFailure(signals.ToolCallRow{
+			verdict := s.contentFailures[stageKey]
+			verdict.Failure = signals.IsFailure(signals.ToolCallRow{
 				Category: s.categoryByCallKey[stageKey], ResultContent: summary,
 			})
+			s.contentFailures[stageKey] = verdict
 		}
 	} else {
 		delete(s.singleSummaryLengths, stageKey)
 		delete(s.contentFailures, stageKey)
-		delete(s.contentOutcomes, stageKey)
 	}
 
 	// The in-memory model keeps a unique placeholder instead of the
@@ -698,8 +698,7 @@ func (s *codexStagingSink) PublishToolResultImages(ctx context.Context) error {
 	}
 
 	s.singleSummaryLengths = make(map[string]int)
-	s.contentFailures = make(map[string]bool)
-	s.contentOutcomes = make(map[string]string)
+	s.contentFailures = make(map[string]db.StagedToolVerdict)
 	s.findings = nil
 	s.findingPos = nil
 	s.eventByCallKey = make(map[string]int64)
@@ -764,9 +763,8 @@ func (s *codexStagingSink) PublishToolResultImages(ctx context.Context) error {
 	}
 	for callKey, candidate := range candidates {
 		s.singleSummaryLengths[callKey] = candidate.length
-		s.contentOutcomes[callKey] = candidate.outcome
 		if !s.disableSignals {
-			s.contentFailures[callKey] = candidate.failure
+			s.contentFailures[callKey] = db.StagedToolVerdict{Failure: candidate.failure, Outcome: candidate.outcome}
 		}
 	}
 	return nil
@@ -902,11 +900,14 @@ func (s *codexStagingSink) ResolveSummary(
 		}
 		if !s.disableSignals {
 			if s.contentFailures == nil {
-				s.contentFailures = make(map[string]bool)
+				s.contentFailures = make(map[string]db.StagedToolVerdict)
 			}
-			s.contentFailures[stageKey] = signals.IsFailure(signals.ToolCallRow{
+			verdict := s.contentFailures[stageKey]
+			verdict.Failure = signals.IsFailure(signals.ToolCallRow{
 				Category: s.categoryByCallKey[stageKey],
 			})
+			verdict.Outcome = "unknown"
+			s.contentFailures[stageKey] = verdict
 		}
 		return "", contentLength, nil
 	}
@@ -994,9 +995,11 @@ func (s *codexStagingSink) ResolveSummary(
 			ResultContent: summary,
 		})
 		if s.contentFailures == nil {
-			s.contentFailures = make(map[string]bool)
+			s.contentFailures = make(map[string]db.StagedToolVerdict)
 		}
-		s.contentFailures[stageKey] = verdict
+		contentVerdict := s.contentFailures[stageKey]
+		contentVerdict.Failure = verdict
+		s.contentFailures[stageKey] = contentVerdict
 	}
 	s.recordContentOutcome(stageKey, summary, s.statusByCallKey[stageKey])
 	selectedEvents := make([]db.ToolResultEvent, 0, len(latest)+1)
@@ -1006,8 +1009,10 @@ func (s *codexStagingSink) ResolveSummary(
 	if hasAnon {
 		selectedEvents = append(selectedEvents, db.ToolResultEvent{Content: lastAnon})
 	}
-	if !s.disableSignals && ingest.ToolResultContentUnknown(db.ToolCall{ResultEvents: selectedEvents}) && s.contentOutcomes[stageKey] != "errored" {
-		s.contentOutcomes[stageKey] = "unknown"
+	if !s.disableSignals && ingest.ToolResultContentUnknown(db.ToolCall{ResultEvents: selectedEvents}) && s.contentFailures[stageKey].Outcome != "errored" {
+		verdict := s.contentFailures[stageKey]
+		verdict.Outcome = "unknown"
+		s.contentFailures[stageKey] = verdict
 	}
 	if eventCount == 1 {
 		summary = db.DedupToolCallResultSummary(
@@ -1091,7 +1096,7 @@ func (s *codexStagingSink) resolveBlockedSummaryLength(
 // ContentFailures returns the per-call content-failure verdicts captured
 // during summary resolution in the publish transaction. Calls the
 // transaction never resolved (no registered tool call) are absent.
-func (s *codexStagingSink) ContentFailures() map[string]bool {
+func (s *codexStagingSink) ContentFailures() map[string]db.StagedToolVerdict {
 	return s.contentFailures
 }
 
@@ -1099,10 +1104,10 @@ func (s *codexStagingSink) recordContentOutcome(key, content, status string) {
 	if s.disableSignals {
 		return
 	}
-	if s.contentOutcomes == nil {
-		s.contentOutcomes = make(map[string]string)
+	if s.contentFailures == nil {
+		s.contentFailures = make(map[string]db.StagedToolVerdict)
 	}
-	s.contentOutcomes[key] = ingest.ClassifyToolResult(s.toolNameByCallKey[key], s.categoryByCallKey[key], content, status)
+	verdict := s.contentFailures[key]
+	verdict.Outcome = ingest.ClassifyToolResult(s.toolNameByCallKey[key], s.categoryByCallKey[key], content, status)
+	s.contentFailures[key] = verdict
 }
-
-func (s *codexStagingSink) ContentOutcomes() map[string]string { return s.contentOutcomes }

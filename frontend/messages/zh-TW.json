@@ -2407,5 +2407,7 @@
         "countPlural=other": "{countLabel} 個對話"
       }
     }
-  ]
+  ],
+  "analytics_tool_history_note": "較早的工作階段可能尚未分析。執行 agentsview sync --full 可補齊歷史比率。",
+  "analytics_tool_matching_calls": "符合的呼叫：{count}"
 }

@@ -1835,18 +1835,11 @@ func (s *Store) analyticsToolRows(
 					ON m.session_id = tc.session_id
 					AND m.id = tc.message_id
 				WHERE tc.session_id IN ` + ph
-		if f.ToolName != "" {
+		for _, predicate := range db.ToolSelectionPredicates("tc", fmt.Sprintf("s.quality_signal_version = %d", db.CurrentQualitySignalVersion), f, func(value string) string { args = append(args, value); return "?" }) {
 			if modelPred != "" {
 				modelPred += " AND "
 			}
-			modelPred += "COALESCE(NULLIF(TRIM(COALESCE(tc.tool_name, '')), ''), 'Unknown') = ?"
-			args = append(args, f.ToolName)
-		}
-		if predicate := db.ToolMetricPredicate("tc", f.ToolMetric); predicate != "" {
-			if modelPred != "" {
-				modelPred += " AND "
-			}
-			modelPred += predicate + fmt.Sprintf(" AND s.quality_signal_version = %d", db.CurrentQualitySignalVersion)
+			modelPred += predicate
 		}
 		if modelPred != "" {
 			query += `

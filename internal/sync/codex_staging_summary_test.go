@@ -36,7 +36,7 @@ func TestStagedSingleEventSummaryThenAdditionalEvent(t *testing.T) {
 			require.NoError(t, err)
 			require.Empty(t, summary)
 			require.Equal(t, tc.length, length)
-			require.Equal(t, tc.failure, sink.ContentFailures()[key])
+			require.Equal(t, tc.failure, sink.ContentFailures()[key].Failure)
 			sink.AppendToolResultEvent(t.Context(), "call", nil, parser.ParsedToolResultEvent{
 				Source: "function_call_output", Content: "done",
 			})
@@ -45,7 +45,7 @@ func TestStagedSingleEventSummaryThenAdditionalEvent(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "done", summary)
 			require.Equal(t, 4, length)
-			require.False(t, sink.ContentFailures()[key])
+			require.False(t, sink.ContentFailures()[key].Failure)
 		})
 	}
 }

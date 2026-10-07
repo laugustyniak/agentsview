@@ -9531,6 +9531,13 @@ paths:
     get:
       operationId: get-api-v1-analytics-signal-sessions
       parameters:
+        - description: Tool category for a tool rate
+          explode: false
+          in: query
+          name: tool_category
+          schema:
+            description: Tool category for a tool rate
+            type: string
         - description: Tool name for a tool rate
           explode: false
           in: query

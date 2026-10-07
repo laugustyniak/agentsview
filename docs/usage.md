@@ -187,10 +187,12 @@ Three histograms showing the distribution of:
 Total tool call count with breakdowns by category (Read, Edit, Write, Bash,
 Search, Web, Task) and by agent. Includes a trend chart showing tool usage over
 time. Each tool also shows empty, repeat and recovery rates. Click a rate to
-open the sessions included in its denominator.
+open sessions with matching empty calls, repeats or recovered sequence starts.
+Each link jumps to the first matching call and shows the matching count.
 
 Empty rate divides empty results by calls with known outcomes. Repeat rate
-divides identical or near-identical follow-ups by analyzed calls. Recovery rate
+divides adjacent identical or near-identical calls in later messages by analyzed
+calls, regardless of the previous outcome. Recovery rate
 divides recovered sequences by recovered plus abandoned sequences. A sequence
 starts with an empty result or error; recovery means a later call returned
 content. The starting tool owns the sequence. Open and unknown endings stay

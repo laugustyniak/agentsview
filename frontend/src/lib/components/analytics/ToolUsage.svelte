@@ -39,7 +39,7 @@
   const toolRows = $derived(analytics.tools?.by_tool ?? []);
 
   let expanded = $state(false);
-  let selectedRate = $state<{ tool: string; metric: string } | null>(null);
+  let selectedRate = $state<{ tool: string; category: string; metric: string } | null>(null);
   let evidence = $state<SignalSessionExample[]>([]);
   let evidenceTotal = $state(0);
   let nextOffset = $state<number | null>(null);
@@ -52,18 +52,18 @@
   $effect(() => {
     const key = evidenceKey;
     const selection = untrack(() => selectedRate);
-    if (selection) untrack(() => loadEvidence(selection.tool, selection.metric));
+    if (selection) untrack(() => loadEvidence(selection.tool, selection.category, selection.metric));
   });
   onDestroy(() => evidenceRead.cancel());
 
-  async function loadEvidence(tool: string, metric: string, offset = 0) {
+  async function loadEvidence(tool: string, category: string, metric: string, offset = 0) {
     const signal = evidenceRead.begin();
-    selectedRate = { tool, metric };
+    selectedRate = { tool, category, metric };
     evidenceLoading = true;
     evidenceError = null;
     if (offset === 0) { evidence = []; evidenceTotal = 0; nextOffset = null; }
     try {
-      const response = await AnalyticsService.getApiV1AnalyticsSignalSessions({ ...evidenceParams, signal: metric, tool_name: tool, limit: 10, offset }, { signal });
+      const response = await AnalyticsService.getApiV1AnalyticsSignalSessions({ ...evidenceParams, signal: metric, tool_name: tool, tool_category: category, limit: 10, offset }, { signal });
       if (!evidenceRead.isCurrent(signal)) return;
       evidence = offset ? [...evidence, ...response.sessions] : response.sessions;
       evidenceTotal = response.total;
@@ -222,7 +222,7 @@
                   style="background: {colorFor(tool.category)}"
                 ></span>
                 <span class="tool-name" title={tool.tool_name}>
-                  {tool.tool_name}
+                  {tool.tool_name}<small class="tool-kind">{tool.category}</small>
                 </span>
                 <span class="tool-category" title={m.analytics_tool_coverage_explanation()}>{tool.analyzed_calls ?? 0}/{tool.call_count}</span>
                 <span class="tool-count">
@@ -236,11 +236,11 @@
                 </span>
                 <span class="tool-pct">{tool.pct}%</span>
                 {#each rateColumns as column}
-                  <span class="tool-rate" title={rateTitle(tool, column.metric)}>
+                  <span class="tool-rate" data-label={column.label} title={rateTitle(tool, column.metric)}>
                     {#if tool[column.field] == null}
                       {m.analytics_tool_unavailable()}
                     {:else}
-                      <Button surface="soft" size="sm" onclick={() => loadEvidence(tool.tool_name, column.metric)} ariaLabel={`${tool.tool_name} ${column.label}`}>
+                      <Button surface="soft" size="sm" onclick={() => loadEvidence(tool.tool_name, tool.category, column.metric)} ariaLabel={`${tool.tool_name} ${column.label}`}>
                         {(tool[column.field]! * 100).toFixed(1)}%
                       </Button>
                     {/if}
@@ -250,19 +250,20 @@
             {/each}
           </div>
           <p class="rate-note">{m.analytics_tool_recovery_note()}</p>
+          {#if toolRows.some((tool) => tool.missing_calls > 0)}<p class="rate-note">{m.analytics_tool_history_note()}</p>{/if}
           {#if toolRows.length > 8}<Button surface="soft" size="sm" onclick={() => expanded = !expanded}>{expanded ? m.analytics_tool_show_less() : m.analytics_tool_show_all()}</Button>{/if}
           {#if selectedRate}
             <section class="tool-evidence" aria-live="polite">
-              <h4 class="section-title">{selectedRate.tool} · {rateColumns.find((c) => c.metric === selectedRate?.metric)?.label}</h4>
+              <h4 class="section-title">{selectedRate.tool} ({selectedRate.category}) · {rateColumns.find((c) => c.metric === selectedRate?.metric)?.label}</h4>
               <p class="rate-note">{m.analytics_tool_evidence_count({ count: evidenceTotal, countLabel: evidenceTotal.toLocaleString() })}</p>
               {#if evidenceLoading}<p class="rate-note">{m.insights_page_loading_examples()}</p>{/if}
-              {#if evidenceError}<p class="error">{evidenceError}</p><Button surface="soft" size="sm" onclick={() => loadEvidence(selectedRate!.tool, selectedRate!.metric)}>{m.shared_retry()}</Button>{/if}
+              {#if evidenceError}<p class="error">{evidenceError}</p><Button surface="soft" size="sm" onclick={() => loadEvidence(selectedRate!.tool, selectedRate!.category, selectedRate!.metric)}>{m.shared_retry()}</Button>{/if}
               {#each evidence as example}
                 <a class="evidence-row" href={router.buildSessionHref(example.session_id, example.message_ordinal == null ? {} : { msg: String(example.message_ordinal) })} onclick={(event) => openSession(event, example)}>
-                  {example.project || m.insights_page_unassigned_project()} · {example.agent} · {example.date}
+                  {example.project || m.insights_page_unassigned_project()} · {example.agent} · {example.date} · {m.analytics_tool_matching_calls({ count: example.signal_total })}
                 </a>
               {/each}
-              {#if nextOffset != null}<Button surface="soft" size="sm" disabled={evidenceLoading} onclick={() => loadEvidence(selectedRate!.tool, selectedRate!.metric, nextOffset!)}>{m.analytics_tool_more_sessions()}</Button>{/if}
+              {#if nextOffset != null}<Button surface="soft" size="sm" disabled={evidenceLoading} onclick={() => loadEvidence(selectedRate!.tool, selectedRate!.category, selectedRate!.metric, nextOffset!)}>{m.analytics_tool_more_sessions()}</Button>{/if}
             </section>
           {/if}
         </div>
@@ -400,6 +401,8 @@
     height: 8px;
     border-radius: 50%;
   }
+
+  .tool-kind { display: block; font-size: 10px; color: var(--text-muted); }
 
   .tool-name {
     min-width: 0;
@@ -564,5 +567,17 @@
     font-size: 11px;
     color: inherit;
     cursor: pointer;
+  }
+  @media (max-width: 640px) {
+    .tool-table { display: block; overflow: visible; }
+    .tool-labels { display: none; }
+    .tool-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 10px 4px; }
+    .tool-dot, .tool-count, .tool-sessions, .tool-pct { display: none; }
+    .tool-name { grid-column: 1 / 3; }
+    .tool-category { text-align: right; }
+    .tool-rate { grid-column: auto; display: flex; flex-direction: column; gap: 4px; font-family: inherit; align-items: center; }
+    .tool-rate::before { content: attr(data-label); font-size: 10px; }
+    .tool-row > .tool-rate:nth-of-type(7) { grid-column: 1; }
+    .tool-rate { min-width: 0; }
   }
 </style>

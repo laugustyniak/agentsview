@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -74,25 +75,31 @@ func TestToolEffectivenessFilteredRatesAndEvidence(t *testing.T) {
 			assert.InDelta(t, float64(tc.recovered)/float64(tc.recovered+tc.abandoned), *tool.RecoveryRate, 0)
 		})
 	}
-	f := AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC", ToolName: "Grep"}
-	first, err := d.GetAnalyticsSignalSessions(t.Context(), f, "tool_recovery_rate", 1)
+	f := AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC", ToolName: "Grep", ToolCategory: "Grep"}
+	first, err := d.GetAnalyticsSignalSessions(t.Context(), f, "tool_empty_rate", 1)
 	require.NoError(t, err)
-	assert.Equal(t, 2, first.Total)
+	assert.Equal(t, 4, first.Total)
 	require.Len(t, first.Sessions, 1)
 	require.NotNil(t, first.NextOffset)
 	f.EvidenceOffset = *first.NextOffset
-	second, err := d.GetAnalyticsSignalSessions(t.Context(), f, "tool_recovery_rate", 1)
+	second, err := d.GetAnalyticsSignalSessions(t.Context(), f, "tool_empty_rate", 1)
 	require.NoError(t, err)
 	require.Len(t, second.Sessions, 1)
 	assert.NotEqual(t, first.Sessions[0].SessionID, second.Sessions[0].SessionID)
-	assert.Nil(t, second.NextOffset)
+	require.NotNil(t, second.NextOffset)
 	f.EvidenceOffset = 0
 	f.Model = "model-b"
-	evidence, err := d.GetAnalyticsSignalSessions(t.Context(), f, "tool_recovery_rate", 20)
+	evidence, err := d.GetAnalyticsSignalSessions(t.Context(), f, "tool_empty_rate", 20)
+	require.NoError(t, err)
+	require.Len(t, evidence.Sessions, 4)
+	f.Model = ""
+	evidence, err = d.GetAnalyticsSignalSessions(t.Context(), f, "tool_recovery_rate", 20)
 	require.NoError(t, err)
 	require.Len(t, evidence.Sessions, 1)
-	assert.Equal(t, "abandoned", evidence.Sessions[0].SessionID)
+	assert.Equal(t, "recovered", evidence.Sessions[0].SessionID)
+	assert.Equal(t, 1, evidence.Sessions[0].SignalTotal)
 	f.ToolName = "Read"
+	f.ToolCategory = "Read"
 	evidence, err = d.GetAnalyticsSignalSessions(t.Context(), f, "tool_recovery_rate", 20)
 	require.NoError(t, err)
 	assert.Empty(t, evidence.Sessions)
@@ -194,4 +201,26 @@ func TestToolObservationsClearWhenArchiveOmitsEvidence(t *testing.T) {
 	messages, err := d.GetAllMessages(t.Context(), "recovered")
 	require.NoError(t, err)
 	assert.Nil(t, messages[0].ToolCalls[0].ObservedOutcome)
+}
+
+func TestToolObservationDeltaPointUpdatesAndRollback(t *testing.T) {
+	d := testDB(t)
+	seedToolRateFixture(t, d)
+	before, err := d.GetAllMessages(t.Context(), "recovered")
+	require.NoError(t, err)
+	delta := SignalDelta{Update: SessionSignalUpdate{QualitySignals: QualitySignals{Version: CurrentQualitySignalVersion}}, ToolObservations: []ToolObservationDelta{{MessageOrdinal: 2, SequenceEnding: new("open")}, {MessageOrdinal: 4, Outcome: new("content"), Repeat: new("none")}}}
+	require.Error(t, d.Update(t.Context(), func(tx *sql.Tx) error {
+		require.NoError(t, applySignalDeltaTx(t.Context(), tx, "recovered", delta))
+		return errors.New("rollback fixture")
+	}))
+	after, err := d.GetAllMessages(t.Context(), "recovered")
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+	require.NoError(t, d.Update(t.Context(), func(tx *sql.Tx) error { return applySignalDeltaTx(t.Context(), tx, "recovered", delta) }))
+	after, err = d.GetAllMessages(t.Context(), "recovered")
+	require.NoError(t, err)
+	assert.Equal(t, "empty", *after[0].ToolCalls[0].ObservedOutcome)
+	assert.Equal(t, "open", *after[0].ToolCalls[0].SequenceEnding)
+	assert.Equal(t, "content", *after[1].ToolCalls[0].ObservedOutcome)
+	assert.Equal(t, before[2], after[2])
 }

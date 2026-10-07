@@ -2211,12 +2211,7 @@ func (s *Store) analyticsToolRows(
 ) ([]db.ToolAnalyticsRow, error) {
 	pb := &paramBuilder{}
 	predicates := []string{}
-	if f.ToolName != "" {
-		predicates = append(predicates, "COALESCE(NULLIF(TRIM(COALESCE(tc.tool_name, '')), ''), 'Unknown') = "+pb.add(f.ToolName))
-	}
-	if predicate := db.ToolMetricPredicate("tc", f.ToolMetric); predicate != "" {
-		predicates = append(predicates, predicate+fmt.Sprintf(" AND s.quality_signal_version = %d", db.CurrentQualitySignalVersion))
-	}
+	predicates = db.ToolSelectionPredicates("tc", fmt.Sprintf("s.quality_signal_version = %d", db.CurrentQualitySignalVersion), f, func(value string) string { return pb.add(value) })
 	q := pgAnalyticsCallsSQL(f, pb, ", agent, project, quality_signal_version",
 		`, tc.category,
 			TRIM(COALESCE(tc.tool_name, '')) AS tool_name, s.agent, s.project, m.ordinal, s.quality_signal_version, tc.observed_outcome, tc.observed_repeat, tc.sequence_ending`, predicates...) + `

@@ -196,7 +196,6 @@ func transcriptMessages(messages []Message) []Message {
 		}
 		calls := slices.Clone(stored[i].ToolCalls)
 		for j := range calls {
-			calls[j].StagedOutcome, calls[j].ObservedOutcome, calls[j].ObservedRepeat, calls[j].SequenceEnding = nil, nil, nil, nil
 			calls[j].InputJSON = ""
 			calls[j].ResultContent = ""
 			if len(calls[j].ResultEvents) == 0 {

@@ -5,6 +5,10 @@ import type { GetApiV1AnalyticsSignalSessionsAutomatedScope } from "./getApiV1An
 
 export type GetApiV1AnalyticsSignalSessionsParams = {
   /**
+   * Tool category for a tool rate
+   */
+  tool_category?: string;
+  /**
    * Tool name for a tool rate
    */
   tool_name?: string;

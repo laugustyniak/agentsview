@@ -34,7 +34,7 @@ func ComputeSignalsAndSecrets(
 // ComputeSignalsAndSecretsWithContentFailures uses precomputed staged result
 // failures when placeholder content cannot carry the verdict.
 func ComputeSignalsAndSecretsWithContentFailures(
-	session db.Session, messages []db.Message, failures map[string]bool,
+	session db.Session, messages []db.Message, failures map[string]db.StagedToolVerdict,
 ) (db.SessionSignalUpdate, []db.SecretFinding) {
 	update := ComputeSignalsFromMessagesWithContentFailures(
 		session, messages, failures,
@@ -59,7 +59,7 @@ func ComputeSignalsFromMessages(
 // ComputeSignalsFromMessagesWithContentFailures derives signals using staged
 // content-failure verdicts.
 func ComputeSignalsFromMessagesWithContentFailures(
-	session db.Session, messages []db.Message, failures map[string]bool,
+	session db.Session, messages []db.Message, failures map[string]db.StagedToolVerdict,
 ) db.SessionSignalUpdate {
 	rows := ExtractToolCallRows(messages)
 	PatchToolCallRowsWithContentFailures(rows, messages, failures)
@@ -70,7 +70,7 @@ func ComputeSignalsFromMessagesWithContentFailures(
 // occurrence-qualified calls whose event status does not already decide them.
 func PatchToolCallRowsWithContentFailures(
 	rows []signals.ToolCallRow, messages []db.Message,
-	failures map[string]bool,
+	failures map[string]db.StagedToolVerdict,
 ) {
 	if len(failures) == 0 {
 		return
@@ -82,16 +82,14 @@ func PatchToolCallRowsWithContentFailures(
 			if index >= len(rows) {
 				return
 			}
-			failed := false
 			if call.ToolUseID != "" {
 				occurrence := occurrences[call.ToolUseID]
 				occurrences[call.ToolUseID] = occurrence + 1
-				failed = failures[db.StagedToolCallKey(
-					call.ToolUseID, occurrence,
-				)]
-			}
-			if failed && rows[index].EventStatus == "" {
-				rows[index].ContentFailure = true
+				if verdict, ok := failures[db.StagedToolCallKey(call.ToolUseID, occurrence)]; ok {
+					rows[index].ContentFailure = verdict.Failure
+					rows[index].ContentFailureKnown = true
+					rows[index].ContentOutcome = signals.ToolOutcome(verdict.Outcome)
+				}
 			}
 			index++
 		}
@@ -213,17 +211,19 @@ func ExtractToolCallRows(messages []db.Message) []signals.ToolCallRow {
 	rows := make([]signals.ToolCallRow, 0)
 	for _, message := range messages {
 		for callIndex, call := range message.ToolCalls {
+			db.RestoreToolCallResultContent(&call)
+			if call.ResultContent == "" {
+				if sole, ok := db.SoleToolResultContent(call.ResultEvents); ok {
+					call.ResultContent = sole.Content
+					call.ResultContentLength = len(sole.Content)
+				}
+			}
 			status := ""
 			if count := len(call.ResultEvents); count > 0 {
 				status = call.ResultEvents[count-1].Status
 			}
-			var stagedOutcome signals.ToolOutcome
-			if call.StagedOutcome != nil {
-				stagedOutcome = signals.ToolOutcome(*call.StagedOutcome)
-			}
 			rows = append(rows, signals.ToolCallRow{
-				ContentOutcome: stagedOutcome,
-				ToolName:       call.ToolName, Category: call.Category,
+				ToolName: call.ToolName, Category: call.Category,
 				InputJSON: call.InputJSON, ResultContent: call.ResultContent,
 				FilePath:       call.FilePath,
 				MessageOrdinal: message.Ordinal, CallIndex: callIndex,

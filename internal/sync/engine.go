@@ -18498,7 +18498,7 @@ func (e *Engine) writeStagedFullParse(
 	positions := stagedToolCallPositions(msgs)
 	var closure db.StagedSignalsFunc
 	if !e.disableSignalRecompute {
-		closure = func(verdicts map[string]bool) (
+		closure = func(verdicts map[string]db.StagedToolVerdict) (
 			db.SessionSignalUpdate, []db.SecretFinding, error,
 		) {
 			update, findings, err := e.computeFullSignalsAndSecretsForStorage(s, msgs, verdicts)

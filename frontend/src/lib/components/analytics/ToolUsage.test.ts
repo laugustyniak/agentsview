@@ -134,21 +134,21 @@ describe("ToolUsage", () => {
           ...missingRates,
           tool_name: "Grep",
           category: "Grep",
-          call_count: 7,
+          call_count: 12,
           session_count: 4,
           pct: 100,
-          analyzed_calls: 6,
-          known_outcome_calls: 5,
-          empty_calls: 5,
-          repeated_calls: 2,
-          recovered_sequences: 1,
+          analyzed_calls: 11,
+          known_outcome_calls: 10,
+          empty_calls: 7,
+          repeated_calls: 5,
+          recovered_sequences: 2,
           abandoned_sequences: 1,
           open_sequences: 1,
           unknown_sequences: 1,
           missing_calls: 1,
-          empty_rate: 1,
-          repeat_rate: 1 / 3,
-          recovery_rate: 0.5,
+          empty_rate: 0.7,
+          repeat_rate: 5 / 11,
+          recovery_rate: 2 / 3,
         },
       ],
     };
@@ -158,15 +158,16 @@ describe("ToolUsage", () => {
     seedRates();
     const component = mount(ToolUsage, { target: document.body });
     await tick();
-    expect(document.body.textContent).toContain("6/7");
-    expect(document.body.textContent).toContain("100.0%");
-    expect(document.body.textContent).toContain("33.3%");
-    expect(document.body.textContent).toContain("50.0%");
+    expect(document.body.textContent).toContain("11/12");
+    expect(document.body.textContent).toContain("agentsview sync --full");
+    expect(document.body.textContent).toContain("70.0%");
+    expect(document.body.textContent).toContain("45.5%");
+    expect(document.body.textContent).toContain("66.7%");
     expect(
-      document.querySelector('[title="5/5 empty results among known outcomes."]'),
+      document.querySelector('[title="7/10 empty results among known outcomes."]'),
     ).not.toBeNull();
     expect(
-      document.querySelector('[title="1/2 recovered sequences. Open: 1. Unknown: 1."]'),
+      document.querySelector('[title="2/3 recovered sequences. Open: 1. Unknown: 1."]'),
     ).not.toBeNull();
     unmount(component);
   });
@@ -211,6 +212,7 @@ describe("ToolUsage", () => {
         project: "project-a",
         model: "model-b",
         tool_name: "Grep",
+        tool_category: "Grep",
         signal: "tool_recovery_rate",
       }),
       expect.anything(),
@@ -224,6 +226,7 @@ describe("ToolUsage", () => {
     await tick();
     await tick();
     expect(document.body.textContent).not.toContain("stale-project");
+    expect(document.body.textContent).toContain("Matching calls: 1");
     (document.querySelector("a.evidence-row") as HTMLAnchorElement).click();
     expect(navigate).toHaveBeenCalledWith("recovered", { msg: "2" });
     unmount(component);
@@ -244,6 +247,49 @@ describe("ToolUsage", () => {
     await tick();
     expect(fetch).toHaveBeenLastCalledWith(
       expect.objectContaining({ project: "project-b", tool_name: "Grep" }),
+      expect.anything(),
+    );
+    unmount(component);
+    analytics.project = "";
+  });
+  it("keeps duplicate tool categories through pagination and filter refresh", async () => {
+    seedRates();
+    const row = analytics.tools!.by_tool[0]!;
+    analytics.tools!.by_tool = [
+      { ...row, tool_name: "readFile", category: "Read" },
+      { ...row, tool_name: "readFile", category: "MCP" },
+    ];
+    const fetch = vi
+      .spyOn(AnalyticsService, "getApiV1AnalyticsSignalSessions")
+      .mockResolvedValue({ signal: "tool_empty_rate", total: 2, next_offset: 1, sessions: [] });
+    const component = mount(ToolUsage, { target: document.body });
+    await tick();
+    const buttons = document.querySelectorAll('[aria-label="readFile Empty rate"]');
+    (buttons[0] as HTMLButtonElement).click();
+    await tick();
+    await tick();
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tool_name: "readFile", tool_category: "Read", offset: 0 }),
+      expect.anything(),
+    );
+    const more = [...document.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes("More sessions"),
+    )!;
+    more.click();
+    await tick();
+    await tick();
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tool_category: "Read", offset: 1 }),
+      expect.anything(),
+    );
+    (buttons[1] as HTMLButtonElement).click();
+    await tick();
+    await tick();
+    analytics.project = "project-b";
+    await tick();
+    await tick();
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ project: "project-b", tool_category: "MCP", offset: 0 }),
       expect.anything(),
     );
     unmount(component);

@@ -2493,5 +2493,7 @@
         "countPlural=other": "{countLabel} sessiya"
       }
     }
-  ]
+  ],
+  "analytics_tool_history_note": "Əvvəlki sessiyalar hesablanmamış ola bilər. Tarixi göstəriciləri doldurmaq üçün agentsview sync --full əmrini işlədin.",
+  "analytics_tool_matching_calls": "Uyğun çağırışlar: {count}"
 }
