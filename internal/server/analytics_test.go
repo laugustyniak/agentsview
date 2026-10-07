@@ -470,7 +470,7 @@ func TestAnalyticsToolEvidenceOptionalCategory(t *testing.T) {
 		id := fmt.Sprintf("tool-filter-%d", i)
 		dbtest.SeedSession(t, te.db, id, "fixture", func(s *db.Session) { s.StartedAt = new("2026-04-26T10:00:00Z"); s.UserMessageCount = 2 })
 		require.NoError(t, te.db.InsertMessages(t.Context(), []db.Message{{SessionID: id, Ordinal: 1, Role: "assistant", Timestamp: "2026-04-26T10:00:00Z", ToolCalls: []db.ToolCall{call}}}))
-		require.NoError(t, te.db.UpdateSessionSignals(t.Context(), id, db.SessionSignalUpdate{ToolObservations: []db.ToolObservation{{MessageOrdinal: 1, Outcome: "empty", Repeat: "none"}}, QualitySignals: db.QualitySignals{Version: db.CurrentQualitySignalVersion}}))
+		require.NoError(t, te.db.UpdateSessionSignals(t.Context(), id, db.SessionSignalUpdate{ToolObservations: []db.ToolObservation{{MessageOrdinal: 1, Outcome: "empty", Repeat: "none"}}, QualitySignals: db.QualitySignals{Version: db.CurrentQualitySignalVersion, UnstructuredStart: true}}))
 	}
 	for _, tc := range []struct {
 		query string
@@ -480,8 +480,24 @@ func TestAnalyticsToolEvidenceOptionalCategory(t *testing.T) {
 		assertStatus(t, w, http.StatusOK)
 		got := decode[db.SignalSessionsResponse](t, w)
 		assert.Equal(t, tc.total, got.Total, tc.query)
+		document := decode[map[string]any](t, w)
+		for _, row := range document["sessions"].([]any) {
+			for _, key := range []string{"failure_signals", "retries", "edit_churn", "is_automated", "outcome", "excerpt"} {
+				assert.NotContains(t, row.(map[string]any), key)
+			}
+		}
 		for _, session := range got.Sessions {
 			assert.Equal(t, new(1), session.MessageOrdinal)
+		}
+	}
+	w := te.get(t, "/api/v1/analytics/signal-sessions?signal=unstructured_start&from=2026-04-26&to=2026-04-26")
+	assertStatus(t, w, http.StatusOK)
+	quality := decode[map[string]any](t, w)
+	require.Len(t, quality["sessions"], 3)
+	for _, row := range quality["sessions"].([]any) {
+		assert.Equal(t, false, row.(map[string]any)["is_automated"])
+		for _, key := range []string{"failure_signals", "retries", "edit_churn"} {
+			assert.Equal(t, float64(0), row.(map[string]any)[key])
 		}
 	}
 }

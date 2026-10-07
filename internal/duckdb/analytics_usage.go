@@ -1828,14 +1828,14 @@ func (s *Store) analyticsToolRows(
 
 		query := `SELECT tc.session_id, tc.category,
 				TRIM(COALESCE(tc.tool_name, '')), COUNT(*),
-				MAX(m.timestamp), MIN(m.ordinal)` + db.ToolEffectivenessSQL("tc", fmt.Sprintf("s.quality_signal_version = %d", db.CurrentQualitySignalVersion)) + `
+				MAX(m.timestamp), MIN(m.ordinal)` + db.ToolEffectivenessSQL("tc", "s.quality_signal_version") + `
 				FROM tool_calls tc
 			JOIN sessions s ON s.id = tc.session_id
 				LEFT JOIN messages m
 					ON m.session_id = tc.session_id
 					AND m.id = tc.message_id
 				WHERE tc.session_id IN ` + ph
-		for _, predicate := range db.ToolSelectionPredicates("tc", fmt.Sprintf("s.quality_signal_version = %d", db.CurrentQualitySignalVersion), f, func(value string) string { args = append(args, value); return "?" }) {
+		for _, predicate := range db.ToolSelectionPredicates("tc", "s.quality_signal_version", f, func(value string) string { args = append(args, value); return "?" }) {
 			if modelPred != "" {
 				modelPred += " AND "
 			}

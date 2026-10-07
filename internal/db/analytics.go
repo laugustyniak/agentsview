@@ -3087,7 +3087,7 @@ func analyticsToolsQuery(
 	query := `SELECT tc.session_id, tc.category,
 			TRIM(COALESCE(tc.tool_name, '')), COUNT(*)`
 	if includeMessageMeta {
-		query += `, MAX(COALESCE(m.timestamp, '')), MIN(m.ordinal)` + ToolEffectivenessSQL("tc", fmt.Sprintf("s.quality_signal_version = %d", CurrentQualitySignalVersion))
+		query += `, MAX(COALESCE(m.timestamp, '')), MIN(m.ordinal)` + ToolEffectivenessSQL("tc", "s.quality_signal_version")
 	}
 	query += `
 		FROM tool_calls tc JOIN sessions s ON s.id = tc.session_id`
@@ -3203,7 +3203,7 @@ func (db *DB) analyticsToolRows(
 				"m.model", f.Model,
 			)
 			chunkArgs = append(chunkArgs, modelArgs...)
-			for _, predicate := range ToolSelectionPredicates("tc", fmt.Sprintf("s.quality_signal_version = %d", CurrentQualitySignalVersion), f, func(value string) string { chunkArgs = append(chunkArgs, value); return "?" }) {
+			for _, predicate := range ToolSelectionPredicates("tc", "s.quality_signal_version", f, func(value string) string { chunkArgs = append(chunkArgs, value); return "?" }) {
 				if modelPred != "" {
 					modelPred += " AND "
 				}
@@ -4088,17 +4088,17 @@ type SignalSessionExample struct {
 	Project        string  `json:"project"`
 	Agent          string  `json:"agent"`
 	Date           string  `json:"date"`
-	IsAutomated    bool    `json:"is_automated"`
-	Outcome        string  `json:"outcome"`
+	IsAutomated    *bool   `json:"is_automated,omitempty"`
+	Outcome        string  `json:"outcome,omitempty"`
 	HealthScore    *int    `json:"health_score"`
 	HealthGrade    *string `json:"health_grade"`
 	SignalTotal    int     `json:"signal_total"`
 	ReasonCode     string  `json:"reason_code"`
-	Excerpt        string  `json:"excerpt"`
+	Excerpt        string  `json:"excerpt,omitempty"`
 	MessageOrdinal *int    `json:"message_ordinal,omitempty"`
-	FailureSignals int     `json:"failure_signals"`
-	Retries        int     `json:"retries"`
-	EditChurn      int     `json:"edit_churn"`
+	FailureSignals *int    `json:"failure_signals,omitempty"`
+	Retries        *int    `json:"retries,omitempty"`
+	EditChurn      *int    `json:"edit_churn,omitempty"`
 }
 
 type SignalMessage struct {
@@ -4587,7 +4587,7 @@ func BuildSignalExamples(
 			Project:        r.Project,
 			Agent:          r.Agent,
 			Date:           r.Date,
-			IsAutomated:    r.IsAutomated,
+			IsAutomated:    new(r.IsAutomated),
 			Outcome:        r.Outcome,
 			HealthScore:    r.HealthScore,
 			HealthGrade:    r.HealthGrade,
@@ -4595,9 +4595,9 @@ func BuildSignalExamples(
 			ReasonCode:     signalReason(signal),
 			Excerpt:        truncateExcerpt(excerpt, 180),
 			MessageOrdinal: ordinal,
-			FailureSignals: r.ToolFailureSignalCount,
-			Retries:        r.ToolRetryCount,
-			EditChurn:      r.EditChurnCount,
+			FailureSignals: new(r.ToolFailureSignalCount),
+			Retries:        new(r.ToolRetryCount),
+			EditChurn:      new(r.EditChurnCount),
 		})
 	}
 	return examples

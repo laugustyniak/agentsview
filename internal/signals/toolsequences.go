@@ -232,10 +232,6 @@ func isMeasuredEmptyToolResult(toolName, content string) bool {
 	}
 }
 
-func classifyToolRepeat(previous, current ToolCallRow) ToolRepeat {
-	return compareSequenceInputs(SequenceFactFor(previous), SequenceFactFor(current))
-}
-
 func compareSequenceInputs(previous, current ToolSequenceFact) ToolRepeat {
 	if previous.ToolName != current.ToolName || current.InputHash == "" {
 		return ToolRepeatNone

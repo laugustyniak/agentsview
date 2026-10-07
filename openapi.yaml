@@ -2974,16 +2974,10 @@ components:
         - project
         - agent
         - date
-        - is_automated
-        - outcome
         - health_score
         - health_grade
         - signal_total
         - reason_code
-        - excerpt
-        - failure_signals
-        - retries
-        - edit_churn
       type: object
     DbSignalSessionsResponse:
       additionalProperties: false

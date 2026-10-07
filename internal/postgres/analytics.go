@@ -2211,12 +2211,12 @@ func (s *Store) analyticsToolRows(
 ) ([]db.ToolAnalyticsRow, error) {
 	pb := &paramBuilder{}
 	predicates := []string{}
-	predicates = db.ToolSelectionPredicates("tc", fmt.Sprintf("s.quality_signal_version = %d", db.CurrentQualitySignalVersion), f, func(value string) string { return pb.add(value) })
+	predicates = db.ToolSelectionPredicates("tc", "s.quality_signal_version", f, func(value string) string { return pb.add(value) })
 	q := pgAnalyticsCallsSQL(f, pb, ", agent, project, quality_signal_version",
 		`, tc.category,
 			TRIM(COALESCE(tc.tool_name, '')) AS tool_name, s.agent, s.project, m.ordinal, s.quality_signal_version, tc.observed_outcome, tc.observed_repeat, tc.sequence_ending`, predicates...) + `
 	SELECT session_id, category, tool_name, agent,
-		local_at::date AS local_date, COUNT(*), project, MIN(ordinal)` + db.ToolEffectivenessSQL("analytics_calls", fmt.Sprintf("quality_signal_version = %d", db.CurrentQualitySignalVersion)) + `
+		local_at::date AS local_date, COUNT(*), project, MIN(ordinal)` + db.ToolEffectivenessSQL("analytics_calls", "quality_signal_version") + `
 	FROM analytics_calls
 	WHERE ` + pgAnalyticsCallLocalWhere(f, pb) + `
 	GROUP BY session_id, category, tool_name, agent, project, local_at::date`

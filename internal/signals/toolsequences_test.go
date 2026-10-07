@@ -375,17 +375,17 @@ func TestNormalizeToolInputPreservesLargeNumbers(t *testing.T) {
 }
 
 func TestClassifyToolRepeatMalformedInputs(t *testing.T) {
-	assert.Equal(t, ToolRepeatIdentical, classifyToolRepeat(
-		ToolCallRow{ToolName: "Grep", InputJSON: "{broken"},
-		ToolCallRow{ToolName: "Grep", InputJSON: "{broken", EventStatus: "errored"},
+	assert.Equal(t, ToolRepeatIdentical, compareSequenceInputs(
+		SequenceFactFor(ToolCallRow{ToolName: "Grep", InputJSON: "{broken"}),
+		SequenceFactFor(ToolCallRow{ToolName: "Grep", InputJSON: "{broken", EventStatus: "errored"}),
 	))
-	assert.Equal(t, ToolRepeatNone, classifyToolRepeat(
-		ToolCallRow{ToolName: "Grep", InputJSON: "{broken"},
-		ToolCallRow{ToolName: "Grep", InputJSON: "{other"},
+	assert.Equal(t, ToolRepeatNone, compareSequenceInputs(
+		SequenceFactFor(ToolCallRow{ToolName: "Grep", InputJSON: "{broken"}),
+		SequenceFactFor(ToolCallRow{ToolName: "Grep", InputJSON: "{other"}),
 	))
-	assert.Equal(t, ToolRepeatNone, classifyToolRepeat(
-		ToolCallRow{ToolName: "Grep"},
-		ToolCallRow{ToolName: "Grep"},
+	assert.Equal(t, ToolRepeatNone, compareSequenceInputs(
+		SequenceFactFor(ToolCallRow{ToolName: "Grep"}),
+		SequenceFactFor(ToolCallRow{ToolName: "Grep"}),
 	))
 }
 

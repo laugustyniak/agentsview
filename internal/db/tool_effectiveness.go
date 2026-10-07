@@ -42,7 +42,8 @@ func toolRate(numerator, denominator int) *float64 {
 }
 
 // ToolEffectivenessSQL extends a store's existing grouped call query.
-func ToolEffectivenessSQL(alias, fresh string) string {
+func ToolEffectivenessSQL(alias, versionColumn string) string {
+	fresh := toolObservationFreshSQL(versionColumn)
 	predicates := []string{
 		alias + ".observed_outcome IS NOT NULL",
 		alias + ".observed_outcome IN ('empty','content','errored')",
@@ -79,7 +80,7 @@ func ToolMetricPredicate(alias, signal string) string {
 }
 
 // ToolSelectionPredicates shares row identity and freshness while each store binds values.
-func ToolSelectionPredicates(alias, fresh string, f AnalyticsFilter, bind func(string) string) []string {
+func ToolSelectionPredicates(alias, versionColumn string, f AnalyticsFilter, bind func(string) string) []string {
 	predicates := []string{}
 	if f.ToolName != "" {
 		predicates = append(predicates, "COALESCE(NULLIF(TRIM(COALESCE("+alias+".tool_name, '')), ''), 'Unknown') = "+bind(f.ToolName))
@@ -88,9 +89,13 @@ func ToolSelectionPredicates(alias, fresh string, f AnalyticsFilter, bind func(s
 		predicates = append(predicates, alias+".category = "+bind(f.ToolCategory))
 	}
 	if predicate := ToolMetricPredicate(alias, f.ToolMetric); predicate != "" {
-		predicates = append(predicates, predicate, fresh)
+		predicates = append(predicates, predicate, toolObservationFreshSQL(versionColumn))
 	}
 	return predicates
+}
+
+func toolObservationFreshSQL(versionColumn string) string {
+	return fmt.Sprintf("%s = %d", versionColumn, CurrentQualitySignalVersion)
 }
 
 // BuildToolMetricEvidence returns distinct contributing sessions in stable order.
