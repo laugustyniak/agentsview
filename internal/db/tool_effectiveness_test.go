@@ -130,7 +130,7 @@ func TestToolEffectivenessMissingAndUnknownDenominators(t *testing.T) {
 	assert.Zero(t, *row.RepeatRate)
 	assert.Nil(t, row.RecoveryRate)
 	require.NoError(t, d.Update(t.Context(), func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE sessions SET quality_signal_version=0 WHERE id='unknown'`)
+		_, err := tx.ExecContext(t.Context(), `UPDATE sessions SET quality_signal_version=0 WHERE id='unknown'`)
 		return err
 	}))
 	response, err = d.GetAnalyticsTools(t.Context(), f)
@@ -190,7 +190,7 @@ func TestToolObservationsFullReplaceWritesWithCalls(t *testing.T) {
 			d := testDB(t)
 			insertSession(t, d, "s1", "project-a")
 			require.NoError(t, d.Update(t.Context(), func(tx *sql.Tx) error {
-				_, err := tx.Exec(`CREATE TRIGGER reject_observation_update BEFORE UPDATE OF observed_outcome ON tool_calls BEGIN SELECT RAISE(ABORT, 'observations must accompany inserts'); END`)
+				_, err := tx.ExecContext(t.Context(), `CREATE TRIGGER reject_observation_update BEFORE UPDATE OF observed_outcome ON tool_calls BEGIN SELECT RAISE(ABORT, 'observations must accompany inserts'); END`)
 				return err
 			}))
 			messages := []Message{{SessionID: "s1", Ordinal: 3, Role: "assistant", ToolCalls: []ToolCall{{ToolName: "Grep", Category: "Grep", ObservedOutcome: new("content")}}}}
@@ -220,6 +220,7 @@ func TestToolObservationsFullReplaceWritesWithCalls(t *testing.T) {
 		})
 	}
 }
+
 func TestToolObservationDeltaPointUpdatesAndRollback(t *testing.T) {
 	d := testDB(t)
 	seedToolRateFixture(t, d)

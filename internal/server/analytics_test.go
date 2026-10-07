@@ -493,7 +493,7 @@ func TestAnalyticsToolEvidenceOptionalCategory(t *testing.T) {
 	for _, row := range quality["sessions"].([]any) {
 		assert.Equal(t, false, row.(map[string]any)["is_automated"])
 		for _, key := range []string{"failure_signals", "retries", "edit_churn"} {
-			assert.Equal(t, float64(0), row.(map[string]any)[key])
+			assert.InDelta(t, 0, row.(map[string]any)[key], 0)
 		}
 	}
 	for _, query := range []string{"&offset=1", "&tool_name=readFile", "&tool_category=Read"} {

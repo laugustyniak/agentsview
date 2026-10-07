@@ -409,20 +409,20 @@ func ApplyToolObservations(messages []Message, observations []ToolObservation) {
 	if observations == nil {
 		return
 	}
-	byOrdinal := make(map[int]int, len(messages))
+	byOrdinal := make(map[int][]ToolCall, len(messages))
 	for i, message := range messages {
-		byOrdinal[message.Ordinal] = i
+		byOrdinal[message.Ordinal] = message.ToolCalls
 		for j := range messages[i].ToolCalls {
 			call := &messages[i].ToolCalls[j]
 			call.ObservedOutcome, call.ObservedRepeat, call.SequenceEnding = nil, nil, nil
 		}
 	}
 	for _, fact := range observations {
-		i, ok := byOrdinal[fact.MessageOrdinal]
-		if !ok || fact.CallIndex < 0 || fact.CallIndex >= len(messages[i].ToolCalls) {
+		calls := byOrdinal[fact.MessageOrdinal]
+		if fact.CallIndex < 0 || fact.CallIndex >= len(calls) {
 			continue
 		}
-		call := &messages[i].ToolCalls[fact.CallIndex]
+		call := &calls[fact.CallIndex]
 		outcome, repeat := fact.Outcome, fact.Repeat
 		call.ObservedOutcome, call.ObservedRepeat, call.SequenceEnding = &outcome, &repeat, fact.SequenceEnding
 	}

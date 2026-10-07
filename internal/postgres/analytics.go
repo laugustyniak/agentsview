@@ -2210,8 +2210,7 @@ func (s *Store) analyticsToolRows(
 	ctx context.Context, f db.AnalyticsFilter,
 ) ([]db.ToolAnalyticsRow, error) {
 	pb := &paramBuilder{}
-	predicates := []string{}
-	predicates = db.ToolSelectionPredicates("tc", "s.quality_signal_version", f, func(value string) string { return pb.add(value) })
+	predicates := db.ToolSelectionPredicates("tc", "s.quality_signal_version", f, func(value string) string { return pb.add(value) })
 	q := pgAnalyticsCallsSQL(f, pb, ", agent, project, quality_signal_version",
 		`, tc.category,
 			TRIM(COALESCE(tc.tool_name, '')) AS tool_name, s.agent, s.project, m.ordinal, s.quality_signal_version, tc.observed_outcome, tc.observed_repeat, tc.sequence_ending`, predicates...) + `

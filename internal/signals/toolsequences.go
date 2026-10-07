@@ -160,7 +160,7 @@ func (s *ToolSequenceContinuation) Step(call ToolSequenceFact) (ToolCallOutcome,
 	return observed, recovered
 }
 
-func (s ToolSequenceContinuation) Ending(complete bool) ToolSequenceEnding {
+func (s *ToolSequenceContinuation) Ending(complete bool) ToolSequenceEnding {
 	if !complete {
 		return ToolSequenceEndingOpen
 	}

@@ -1,15 +1,16 @@
 package signals
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestToolSequenceContinuationBoundedReplay(t *testing.T) {
-	calls := make([]ToolCallRow, 2000)
-	for i := range calls {
-		calls[i] = ToolCallRow{MessageOrdinal: i, ToolName: "Grep", Category: "Grep", InputJSON: `{"pattern":"alpha"}`, ResultContent: "No matches found"}
+	calls := make([]ToolCallRow, 0, 2000)
+	for i := range 2000 {
+		calls = append(calls, ToolCallRow{MessageOrdinal: i, ToolName: "Grep", Category: "Grep", InputJSON: `{"pattern":"alpha"}`, ResultContent: "No matches found"})
 	}
 	state := SeedIncrementalState(calls, nil, "", "", nil, nil, 0, 0, 0)
 	require.Len(t, state.Trailing, TrailingFactCount)

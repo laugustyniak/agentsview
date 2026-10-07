@@ -798,7 +798,7 @@ func TestResyncAbortsWhenReplacementCheckpointFails(t *testing.T) {
 						return nil
 					}
 					return newDB.Update(ctx, func(tx *sql.Tx) error {
-						_, err := tx.Exec(`CREATE TRIGGER fail_copied_signals BEFORE UPDATE OF quality_signal_version ON sessions WHEN OLD.id = 'orphan' BEGIN SELECT RAISE(ABORT, 'fixture signal failure'); END`)
+						_, err := tx.ExecContext(t.Context(), `CREATE TRIGGER fail_copied_signals BEFORE UPDATE OF quality_signal_version ON sessions WHEN OLD.id = 'orphan' BEGIN SELECT RAISE(ABORT, 'fixture signal failure'); END`)
 						return err
 					})
 				},

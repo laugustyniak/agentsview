@@ -2803,7 +2803,7 @@ func BuildToolsAnalytics(rows []ToolAnalyticsRow) ToolsAnalyticsResponse {
 			}
 			toolCounts[key] = acc
 		}
-		acc.ToolEffectivenessCounts.Add(row.ToolEffectivenessCounts)
+		acc.Add(row.ToolEffectivenessCounts)
 		acc.callCount += row.Count
 		if row.SessionID != "" {
 			acc.sessionIDs[row.SessionID] = struct{}{}

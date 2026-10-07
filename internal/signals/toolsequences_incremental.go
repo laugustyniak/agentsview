@@ -10,7 +10,7 @@ type ToolObservationChange struct {
 }
 
 // FoldToolSequences replays only the fixed tail and appended calls, including a crossing start.
-func (s IncrementalState) FoldToolSequences(appended []ToolCallRow, modified map[CallPos]ToolFact, complete bool) (ToolSequenceContinuation, []ToolObservationChange) {
+func (s *IncrementalState) FoldToolSequences(appended []ToolCallRow, modified map[CallPos]ToolFact, complete bool) (ToolSequenceContinuation, []ToolObservationChange) {
 	changes := map[CallPos]ToolObservationChange{}
 	old := s.SequencePrefix
 	if old.Active != nil {
