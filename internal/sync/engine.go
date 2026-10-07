@@ -3912,13 +3912,27 @@ func (e *Engine) resyncBuildLocked(
 		time.Since(tUsageIndexes).Round(time.Millisecond),
 	)
 	if err := func() error {
-		e.db = newDB
-		defer func() { e.db = origDB }()
-		compute := e.BackfillSignalComputer()
+		if e.disableSignalRecompute {
+			return ctx.Err()
+		}
+		var release recomputeHeapReleaser
 		for _, id := range copiedSessionIDs {
-			if err := compute(ctx, id); err != nil {
-				return fmt.Errorf("recomputing copied session %s: %w", id, err)
+			session, err := newDB.GetSessionFull(ctx, id)
+			if err != nil {
+				return err
 			}
+			if session == nil || session.QualitySignalVersion != db.CurrentQualitySignalVersion {
+				continue
+			}
+			messages, err := newDB.GetAllMessages(ctx, id)
+			if err != nil {
+				return err
+			}
+			observations := ingest.ComputeToolObservations(*session, ingest.ExtractToolCallRows(messages))
+			if err := newDB.UpdateToolObservations(ctx, id, observations); err != nil {
+				return fmt.Errorf("computing copied session observations %s: %w", id, err)
+			}
+			release.Account(recomputeHeapBytes(messages, nil))
 		}
 		return ctx.Err()
 	}(); err != nil {

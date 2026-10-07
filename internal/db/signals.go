@@ -198,15 +198,8 @@ func updateSessionSignalsTx(
 			sessionID, err,
 		)
 	}
-	if u.ToolObservations != nil {
-		if _, err := tx.Exec(`UPDATE tool_calls SET observed_outcome = NULL, observed_repeat = NULL, sequence_ending = NULL WHERE session_id = ?`, sessionID); err != nil {
-			return err
-		}
-		for _, fact := range u.ToolObservations {
-			if _, err := tx.Exec(`UPDATE tool_calls SET observed_outcome = ?, observed_repeat = ?, sequence_ending = ? WHERE session_id = ? AND call_index = ? AND message_id = (SELECT id FROM messages WHERE session_id = ? AND ordinal = ?)`, fact.Outcome, fact.Repeat, fact.SequenceEnding, sessionID, fact.CallIndex, sessionID, fact.MessageOrdinal); err != nil {
-				return fmt.Errorf("updating tool observations: %w", err)
-			}
-		}
+	if err := updateToolObservationsTx(tx, sessionID, u.ToolObservations); err != nil {
+		return err
 	}
 	if u.FullState != nil {
 		state := u.FullState
@@ -225,6 +218,41 @@ func updateSessionSignalsTx(
 			state.State, state.SignalVersion, sessionID,
 		); err != nil {
 			return fmt.Errorf("writing full signal state for %s: %w", sessionID, err)
+		}
+	}
+	return nil
+}
+
+// UpdateToolObservations publishes call facts while preserving saved session signals.
+func (db *DB) UpdateToolObservations(ctx context.Context, sessionID string, observations []ToolObservation) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	tx, err := db.getWriter().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if db.ArchiveContent().OmitsToolContent() {
+		observations = []ToolObservation{}
+	}
+	if err := updateToolObservationsTx(tx, sessionID, observations); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET local_modified_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func updateToolObservationsTx(tx transactionQueries, sessionID string, observations []ToolObservation) error {
+	if observations != nil {
+		if _, err := tx.Exec(`UPDATE tool_calls SET observed_outcome = NULL, observed_repeat = NULL, sequence_ending = NULL WHERE session_id = ?`, sessionID); err != nil {
+			return err
+		}
+		for _, fact := range observations {
+			if _, err := tx.Exec(`UPDATE tool_calls SET observed_outcome = ?, observed_repeat = ?, sequence_ending = ? WHERE session_id = ? AND call_index = ? AND message_id = (SELECT id FROM messages WHERE session_id = ? AND ordinal = ?)`, fact.Outcome, fact.Repeat, fact.SequenceEnding, sessionID, fact.CallIndex, sessionID, fact.MessageOrdinal); err != nil {
+				return fmt.Errorf("updating tool observations: %w", err)
+			}
 		}
 	}
 	return nil

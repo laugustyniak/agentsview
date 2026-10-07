@@ -23,11 +23,17 @@ func TestToolSequenceStructuredEvidence(t *testing.T) {
 		{"whitespace latest", []db.ToolResultEvent{{Content: "[image]"}, {Content: "\t\u2002\r\n"}}, signals.ToolOutcomeUnknown},
 		{"single blank event", []db.ToolResultEvent{{Content: "", Status: "completed"}}, signals.ToolOutcomeEmpty},
 		{"several blank events", []db.ToolResultEvent{{Content: "", Status: "completed"}, {Content: "", Status: "completed"}}, signals.ToolOutcomeEmpty},
+		{"text then NUL", []db.ToolResultEvent{{Content: "old text", Status: "completed"}, {Content: "\x00", Status: "completed"}}, signals.ToolOutcomeEmpty},
+		{"error then NUL", []db.ToolResultEvent{{Content: "command not found", Status: "completed"}, {Content: "\x00", Status: "completed"}}, signals.ToolOutcomeEmpty},
+		{"image then NUL", []db.ToolResultEvent{{Content: "[image]", Status: "completed"}, {Content: "\x00", Status: "completed"}}, signals.ToolOutcomeUnknown},
 		{"anonymous latest", []db.ToolResultEvent{{Content: "old text"}, {Content: `[{"type":"input_image","image_url":"data:image/png;base64,AAEC"}]`}}, signals.ToolOutcomeUnknown},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			messages := []db.Message{{Ordinal: 1, ToolCalls: []db.ToolCall{{ToolName: "Read", Category: "Read", ResultEvents: tt.events}}}}
 			require.NoError(t, ingest.PairToolResultEventSummariesContext(t.Context(), messages, nil))
+			for i := range messages {
+				db.SanitizeMessage(&messages[i])
+			}
 			got := signals.ExtractToolSequences(ingest.ExtractToolCallRows(messages), true)
 			require.Len(t, got.Calls, 1)
 			assert.Equal(t, tt.want, got.Calls[0].Outcome)

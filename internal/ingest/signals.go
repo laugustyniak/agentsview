@@ -154,17 +154,23 @@ func ComputeSignalsFromToolRows(
 			RunawayToolLoopCount:        heuristics.RunawayToolLoopCount,
 		},
 	}
+	update.ToolObservations = ComputeToolObservations(session, rows)
+	return RefreshSignalRecencyAt(session, messages, update, time.Now())
+}
+
+// ComputeToolObservations derives only call outcomes and sequence endings.
+func ComputeToolObservations(session db.Session, rows []signals.ToolCallRow) []db.ToolObservation {
 	complete := parser.TerminationComplete(session.TerminationStatus)
 	extracted := signals.ExtractToolSequences(rows, complete)
-	update.ToolObservations = make([]db.ToolObservation, len(extracted.Calls))
+	observations := make([]db.ToolObservation, len(extracted.Calls))
 	for i, call := range extracted.Calls {
-		update.ToolObservations[i] = db.ToolObservation{MessageOrdinal: call.MessageOrdinal, CallIndex: call.CallIndex, Outcome: string(call.Outcome), Repeat: string(call.Repeat)}
+		observations[i] = db.ToolObservation{MessageOrdinal: call.MessageOrdinal, CallIndex: call.CallIndex, Outcome: string(call.Outcome), Repeat: string(call.Repeat)}
 	}
 	for _, sequence := range extracted.Sequences {
 		ending := string(sequence.Ending)
-		update.ToolObservations[sequence.Start].SequenceEnding = &ending
+		observations[sequence.Start].SequenceEnding = &ending
 	}
-	return RefreshSignalRecencyAt(session, messages, update, time.Now())
+	return observations
 }
 
 // RefreshSignalRecencyAt settles only clock-derived state using the same stable
@@ -213,12 +219,6 @@ func ExtractToolCallRows(messages []db.Message) []signals.ToolCallRow {
 	for _, message := range messages {
 		for callIndex, call := range message.ToolCalls {
 			db.RestoreToolCallResultContent(&call)
-			if call.ResultContent == "" {
-				if sole, ok := db.SoleToolResultContent(call.ResultEvents); ok {
-					call.ResultContent = sole.Content
-					call.ResultContentLength = len(sole.Content)
-				}
-			}
 			status := ""
 			if count := len(call.ResultEvents); count > 0 {
 				status = call.ResultEvents[count-1].Status

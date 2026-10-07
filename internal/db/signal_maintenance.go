@@ -17,6 +17,7 @@ import (
 // columns extractToolCallRows reads from stored rows, so facts the maintainer
 // sees match a full recompute over GetAllMessages.
 type ToolCallSignalFact struct {
+	ResultContentLength  int
 	ResultContentUnknown bool
 	MessageOrdinal       int
 	CallIndex            int
@@ -280,7 +281,7 @@ func (q signalTxQuery) TrailingToolCalls(
 		SELECT m.ordinal, COALESCE(tc.call_index, 0),
 		       tc.tool_name, tc.category, COALESCE(tc.input_json, ''),
 		       `+ToolCallResultContentSQL("tc", "m.ordinal")+`,
-		       COALESCE(tc.tool_use_id, ''),
+		       COALESCE(tc.result_content_length, 0), COALESCE(tc.tool_use_id, ''),
 		       COALESCE((
 		           SELECT tre.status FROM tool_result_events tre
 		           WHERE tre.session_id = tc.session_id
@@ -307,7 +308,7 @@ func (q signalTxQuery) TrailingToolCalls(
 		var f ToolCallSignalFact
 		if err := rows.Scan(
 			&f.MessageOrdinal, &f.CallIndex, &f.ToolName, &f.Category,
-			&f.InputJSON, &f.ResultContent, &f.ToolUseID, &f.EventStatus,
+			&f.InputJSON, &f.ResultContent, &f.ResultContentLength, &f.ToolUseID, &f.EventStatus,
 		); err != nil {
 			return nil, fmt.Errorf(
 				"scanning trailing tool call %s: %w", q.sessionID, err,
@@ -368,7 +369,7 @@ func (q signalTxQuery) toolCallsByPositionChunk(
 		SELECT m.ordinal, COALESCE(tc.call_index, 0),
 		       tc.tool_name, tc.category, COALESCE(tc.input_json, ''),
 		       `+ToolCallResultContentSQL("tc", "m.ordinal")+`,
-		       COALESCE(tc.tool_use_id, ''),
+		       COALESCE(tc.result_content_length, 0), COALESCE(tc.tool_use_id, ''),
 		       COALESCE((
 		           SELECT tre.status FROM tool_result_events tre
 		           WHERE tre.session_id = tc.session_id
@@ -395,7 +396,7 @@ func (q signalTxQuery) toolCallsByPositionChunk(
 		var f ToolCallSignalFact
 		if err := rows.Scan(
 			&f.MessageOrdinal, &f.CallIndex, &f.ToolName, &f.Category,
-			&f.InputJSON, &f.ResultContent, &f.ToolUseID, &f.EventStatus,
+			&f.InputJSON, &f.ResultContent, &f.ResultContentLength, &f.ToolUseID, &f.EventStatus,
 		); err != nil {
 			return nil, fmt.Errorf(
 				"scanning tool call fact %s: %w", q.sessionID, err,

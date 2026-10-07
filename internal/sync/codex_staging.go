@@ -611,7 +611,7 @@ func (s *codexStagingSink) AppendToolResultEvent(ctx context.Context,
 			summary = ""
 		}
 		s.singleSummaryLengths[stageKey] = len(summary)
-		s.recordContentOutcome(stageKey, summary, ev.Status)
+		s.recordContentOutcome(stageKey, summary, ev.Status, signals.IsUnknownResultContent(storedContent))
 		if !s.disableSignals {
 			if s.contentFailures == nil {
 				s.contentFailures = make(map[string]db.StagedToolVerdict)
@@ -928,6 +928,7 @@ func (s *codexStagingSink) ResolveSummary(
 	var soleContent string
 	var order []string
 	latest := make(map[string]string)
+	evidenceByAgent := make(map[string]string)
 	var lastAnon string
 	hasAnon := false
 	for rows.Next() {
@@ -942,10 +943,13 @@ func (s *codexStagingSink) ResolveSummary(
 		} else {
 			soleContent = ""
 		}
+		agent := strings.TrimSpace(agentID)
+		if strings.TrimSpace(content) != "" {
+			evidenceByAgent[agent] = content
+		}
 		if !participates {
 			continue
 		}
-		agent := strings.TrimSpace(agentID)
 		if agent == "" {
 			hasAnon = true
 			lastAnon = content
@@ -1000,22 +1004,14 @@ func (s *codexStagingSink) ResolveSummary(
 		contentVerdict.Failure = verdict
 		s.contentFailures[stageKey] = contentVerdict
 	}
-	s.recordContentOutcome(stageKey, summary, s.statusByCallKey[stageKey])
-	selectedEvents := make([]signals.ResultContentEvidence, 0, len(latest)+1)
-	for agent, content := range latest {
+	selectedEvents := make([]signals.ResultContentEvidence, 0, len(evidenceByAgent))
+	for agent, content := range evidenceByAgent {
 		selectedEvents = append(selectedEvents, signals.ResultContentEvidence{AgentID: agent, Content: content})
-	}
-	if hasAnon {
-		selectedEvents = append(selectedEvents, signals.ResultContentEvidence{Content: lastAnon})
 	}
 	if eventCount == 1 {
 		selectedEvents = []signals.ResultContentEvidence{{Content: soleContent}}
 	}
-	if !s.disableSignals && signals.ToolResultContentUnknown(summary, eventCount, selectedEvents) && s.contentFailures[stageKey].Outcome != "errored" {
-		verdict := s.contentFailures[stageKey]
-		verdict.Outcome = "unknown"
-		s.contentFailures[stageKey] = verdict
-	}
+	s.recordContentOutcome(stageKey, summary, s.statusByCallKey[stageKey], signals.ToolResultContentUnknown(summary, eventCount, selectedEvents))
 	if eventCount == 1 {
 		summary = db.DedupToolCallResultSummary(
 			summary, []db.ToolResultEvent{{Content: soleContent}},
@@ -1102,7 +1098,7 @@ func (s *codexStagingSink) ContentFailures() map[string]db.StagedToolVerdict {
 	return s.contentFailures
 }
 
-func (s *codexStagingSink) recordContentOutcome(key, content, status string) {
+func (s *codexStagingSink) recordContentOutcome(key, content, status string, unknown bool) {
 	if s.disableSignals {
 		return
 	}
@@ -1110,6 +1106,6 @@ func (s *codexStagingSink) recordContentOutcome(key, content, status string) {
 		s.contentFailures = make(map[string]db.StagedToolVerdict)
 	}
 	verdict := s.contentFailures[key]
-	verdict.Outcome = string(signals.ClassifyToolOutcome(signals.ToolCallRow{ToolName: s.toolNameByCallKey[key], Category: s.categoryByCallKey[key], ResultContent: content, ResultContentLength: len(content), EventStatus: status, ResultContentUnknown: signals.IsUnknownResultContent(content)}))
+	verdict.Outcome = string(signals.ClassifyToolOutcome(signals.ToolCallRow{ToolName: s.toolNameByCallKey[key], Category: s.categoryByCallKey[key], ResultContent: content, ResultContentLength: len(content), EventStatus: status, ResultContentUnknown: unknown}))
 	s.contentFailures[key] = verdict
 }

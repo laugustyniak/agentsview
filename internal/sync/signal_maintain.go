@@ -149,7 +149,7 @@ func (m *incrementalSignalMaintainer) MaintainTx(
 			MessageOrdinal:       fact.MessageOrdinal,
 			CallIndex:            fact.CallIndex,
 			EventStatus:          fact.EventStatus,
-			ResultContentLength:  len(fact.ResultContent),
+			ResultContentLength:  fact.ResultContentLength,
 			ResultContentUnknown: fact.ResultContentUnknown,
 		}
 		f := signals.ToolFact{

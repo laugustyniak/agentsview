@@ -186,7 +186,7 @@ func TestResyncBuildThenSwapMatchesResyncAll(t *testing.T) {
 			{SessionID: id, Ordinal: 0, Role: "assistant", ToolCalls: []db.ToolCall{{ToolName: "Grep", Category: "Grep", ResultContent: "No matches found"}}},
 			{SessionID: id, Ordinal: 1, Role: "assistant", ToolCalls: []db.ToolCall{{ToolName: "Read", Category: "Read", ResultContent: "file contents"}}},
 		}))
-		require.NoError(t, database.UpdateSessionSignals(t.Context(), id, db.SessionSignalUpdate{QualitySignals: db.QualitySignals{Version: db.CurrentQualitySignalVersion}}))
+		require.NoError(t, database.UpdateSessionSignals(t.Context(), id, db.SessionSignalUpdate{HealthScore: new(94), HealthGrade: new("A"), QualitySignals: db.QualitySignals{Version: db.CurrentQualitySignalVersion, ShortPromptCount: 2, MissingVerificationCount: 3}}))
 		messages, err := database.GetAllMessages(t.Context(), id)
 		require.NoError(t, err)
 		require.Nil(t, messages[0].ToolCalls[0].ObservedOutcome)
@@ -194,6 +194,11 @@ func TestResyncBuildThenSwapMatchesResyncAll(t *testing.T) {
 	require.NoError(t, database.SoftDeleteSession(t.Context(), "keep1"))
 	assertObservations := func(d *db.DB) {
 		for _, id := range []string{"orphan", "keep1"} {
+			session, err := d.GetSessionFull(t.Context(), id)
+			require.NoError(t, err)
+			assert.Equal(t, new(94), session.HealthScore)
+			assert.Equal(t, 2, session.ShortPromptCount)
+			assert.Equal(t, 3, session.MissingVerificationCount)
 			messages, err := d.GetAllMessages(t.Context(), id)
 			require.NoError(t, err)
 			require.Len(t, messages, 2)
@@ -786,6 +791,8 @@ func TestResyncAbortsWhenReplacementCheckpointFails(t *testing.T) {
 		t.Run(failure, func(t *testing.T) {
 			e, database, root := newResyncSplitEngine(t)
 			require.NoError(t, os.Remove(filepath.Join(root, "project", "orphan.jsonl")))
+			require.NoError(t, database.InsertMessages(t.Context(), []db.Message{{SessionID: "orphan", Ordinal: 2, Role: "assistant", ToolCalls: []db.ToolCall{{ToolName: "Read", Category: "Read", ResultContent: "content"}}}}))
+			require.NoError(t, database.UpdateSessionSignals(t.Context(), "orphan", db.SessionSignalUpdate{QualitySignals: db.QualitySignals{Version: db.CurrentQualitySignalVersion}}))
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			stats, err := e.resyncAllWithOptionsAndOperations(ctx, nil, RebuildOptions{}, rebuildOperations{
@@ -798,7 +805,7 @@ func TestResyncAbortsWhenReplacementCheckpointFails(t *testing.T) {
 						return nil
 					}
 					return newDB.Update(ctx, func(tx *sql.Tx) error {
-						_, err := tx.ExecContext(t.Context(), `CREATE TRIGGER fail_copied_signals BEFORE UPDATE OF quality_signal_version ON sessions WHEN OLD.id = 'orphan' BEGIN SELECT RAISE(ABORT, 'fixture signal failure'); END`)
+						_, err := tx.ExecContext(t.Context(), `CREATE TRIGGER fail_copied_signals BEFORE UPDATE OF observed_outcome ON tool_calls WHEN OLD.session_id = 'orphan' BEGIN SELECT RAISE(ABORT, 'fixture signal failure'); END`)
 						return err
 					})
 				},
