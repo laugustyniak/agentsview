@@ -199,8 +199,8 @@ content. The starting tool owns the sequence. Open and unknown endings stay
 outside the recovery denominator. A missing denominator shows Unavailable.
 
 Project, date and model filters select individual calls. Coverage shows
-analyzed calls divided by all calls. Older sessions stay uncomputed until their
-normal signal refresh; a full `agentsview sync --full` populates them. Pending
+analyzed calls divided by all calls. Sessions gain coverage when changed or during
+`agentsview sync --full`, including archived copies whose source files are gone. Pending
 refreshes have missing coverage until the recompute commits. PostgreSQL,
 DuckDB and ClickHouse receive these observations through their normal pushes.
 Archives that omit tool content report missing coverage.

@@ -3911,6 +3911,27 @@ func (e *Engine) resyncBuildLocked(
 		"resync: rebuild usage indexes: %s",
 		time.Since(tUsageIndexes).Round(time.Millisecond),
 	)
+	if err := func() error {
+		e.db = newDB
+		defer func() { e.db = origDB }()
+		compute := e.BackfillSignalComputer()
+		for _, id := range copiedSessionIDs {
+			if err := compute(ctx, id); err != nil {
+				return fmt.Errorf("recomputing copied session %s: %w", id, err)
+			}
+		}
+		return ctx.Err()
+	}(); err != nil {
+		stats.Aborted = true
+		stats.Warnings = append(stats.Warnings, "copied session signal computation failed, aborting swap: "+err.Error())
+		newDB.Close()
+		removeTempDB(tempPath)
+		restoreSkipCache()
+		e.mu.Lock()
+		e.lastSyncStats = stats
+		e.mu.Unlock()
+		return stats, err
+	}
 
 	// Persist the fresh skip state into the replacement so the post-swap engine
 	// loads warm state: this engine after an in-process swap, or the daemon

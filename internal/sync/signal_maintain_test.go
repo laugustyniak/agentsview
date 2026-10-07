@@ -712,6 +712,20 @@ func TestIncrementalSignalMaintainerParityWithFullResync(t *testing.T) {
 	incrementalTools, err := database.GetAnalyticsTools(t.Context(), db.AnalyticsFilter{})
 	require.NoError(t, err)
 
+	observations := func() []db.ToolObservation {
+		messages, err := database.GetAllMessages(t.Context(), sessionID)
+		require.NoError(t, err)
+		var facts []db.ToolObservation
+		for _, message := range messages {
+			for _, call := range message.ToolCalls {
+				require.NotNil(t, call.ObservedOutcome)
+				require.NotNil(t, call.ObservedRepeat)
+				facts = append(facts, db.ToolObservation{MessageOrdinal: message.Ordinal, CallIndex: call.CallIndex, Outcome: *call.ObservedOutcome, Repeat: *call.ObservedRepeat, SequenceEnding: call.SequenceEnding})
+			}
+		}
+		return facts
+	}
+	incrementalObservations := observations()
 	// Authoritative rebuild: rewrite the file in place (same size),
 	// drop the checkpoint, and bump the mtime so the engine takes the
 	// full-parse replacement path.
@@ -762,6 +776,7 @@ func TestIncrementalSignalMaintainerParityWithFullResync(t *testing.T) {
 	fullTools, err := database.GetAnalyticsTools(t.Context(), db.AnalyticsFilter{})
 	require.NoError(t, err)
 	assert.Equal(t, incrementalTools, fullTools, "tool rates must match full resync")
+	assert.Equal(t, incrementalObservations, observations(), "per-call observations must match full resync")
 
 	// The full resync reseeds the state; a follow-up append must fold
 	// again without a decline.
