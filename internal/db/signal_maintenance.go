@@ -362,6 +362,7 @@ func (q signalTxQuery) toolCallsByPositionChunk(
 		args = append(args, position.MessageOrdinal, position.CallIndex)
 	}
 	args = append(args, q.sessionID)
+	const eventCountSQL = `(SELECT COUNT(*) FROM (SELECT 1 FROM tool_result_events tre WHERE tre.session_id=tc.session_id AND tre.tool_call_message_ordinal=m.ordinal AND tre.call_index=COALESCE(tc.call_index,0) LIMIT 2))`
 	rows, err := q.tx.QueryContext(ctx, `
 		WITH wanted(message_ordinal, call_index) AS (
 			VALUES `+multiRowPlaceholders(len(positions), 2)+`
@@ -378,8 +379,8 @@ func (q signalTxQuery) toolCallsByPositionChunk(
 		           ORDER BY tre.event_index DESC, tre.id DESC
 		           LIMIT 1
 		       ), ''),
-		       (SELECT COUNT(*) FROM (SELECT 1 FROM tool_result_events tre WHERE tre.session_id=tc.session_id AND tre.tool_call_message_ordinal=m.ordinal AND tre.call_index=COALESCE(tc.call_index,0) LIMIT 2)),
-		       COALESCE((SELECT tre.content FROM tool_result_events tre WHERE tre.session_id=tc.session_id AND tre.tool_call_message_ordinal=m.ordinal AND tre.call_index=COALESCE(tc.call_index,0) LIMIT 1), '')
+		       `+eventCountSQL+`,
+		       CASE WHEN `+eventCountSQL+`=1 THEN COALESCE((SELECT tre.content FROM tool_result_events tre WHERE tre.session_id=tc.session_id AND tre.tool_call_message_ordinal=m.ordinal AND tre.call_index=COALESCE(tc.call_index,0) LIMIT 1), '') ELSE '' END
 		FROM wanted
 		JOIN messages m ON m.ordinal = wanted.message_ordinal
 		JOIN tool_calls tc ON tc.message_id = m.id
@@ -394,11 +395,11 @@ func (q signalTxQuery) toolCallsByPositionChunk(
 	}
 	defer rows.Close()
 	var facts []ToolCallSignalFact
-	var counts []int
-	var events [][]signals.ResultContentEvidence
+	counts := make([]int, 0, len(positions))
+	events := make([][]signals.ResultContentEvidence, 0, len(positions))
 	for rows.Next() {
 		var f ToolCallSignalFact
-		var count int
+		count := 0
 		var soleContent string
 		if err := rows.Scan(
 			&f.MessageOrdinal, &f.CallIndex, &f.ToolName, &f.Category,
@@ -410,7 +411,7 @@ func (q signalTxQuery) toolCallsByPositionChunk(
 		}
 		facts = append(facts, f)
 		counts = append(counts, count)
-		var evidence []signals.ResultContentEvidence
+		evidence := make([]signals.ResultContentEvidence, 0)
 		if count == 1 {
 			evidence = []signals.ResultContentEvidence{{Content: soleContent}}
 		}

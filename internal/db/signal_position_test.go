@@ -19,6 +19,7 @@ func TestToolCallsByPositionResultEvidence(t *testing.T) {
 		length  int
 	}{
 		{"[image]", nil, true, 7},
+		{"[image]", []ToolResultEvent{{Content: ""}}, false, 7},
 		{"", []ToolResultEvent{{Content: "content"}, {Content: "[image]"}, {Content: ""}}, true, 0},
 		{"", nil, false, 7},
 		{"", []ToolResultEvent{{Content: ""}}, false, 0},
