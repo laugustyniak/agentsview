@@ -230,6 +230,10 @@ The latest published release is
 **Bug fixes**
 
 - Oversized telemetry requests return HTTP 413.
+- Activity counts single-prompt Claude print-mode workers as Automated, and
+  Codex exec jobs keep that classification when new messages arrive. Existing
+  archived sessions are corrected on startup.
+
 - Hosted raw sync keeps a session listed and searchable after its source file
   disappears from the device that uploaded it, matching the local archive.
   Before, `raw-sync watch` reporting a missing file hid the session, emptied it
