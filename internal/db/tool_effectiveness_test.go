@@ -225,15 +225,16 @@ func TestToolObservationsFullReplaceWritesWithCalls(t *testing.T) {
 			}))
 			messages := []Message{{SessionID: "s1", Ordinal: 3, Role: "assistant", ToolCalls: []ToolCall{{ToolName: "Grep", Category: "Grep", ObservedOutcome: new("content")}}}}
 			update := SessionSignalUpdate{ToolObservations: []ToolObservation{{MessageOrdinal: 3, Outcome: "empty", Repeat: "none", SequenceEnding: new("abandoned")}}}
-			if route == "observations-transcripts" {
+			switch route {
+			case "observations-transcripts":
 				_, err := d.getWriter().Exec(t.Context(), "DROP TRIGGER reject_observation_update")
 				require.NoError(t, err)
 				require.NoError(t, d.ReplaceSessionContent(t.Context(), "s1", messages, update, nil))
 				d.SetArchiveContent(config.ArchiveContentTranscripts)
 				require.NoError(t, d.UpdateToolObservations(t.Context(), "s1", nil))
-			} else if route == "single" {
+			case "single":
 				require.NoError(t, d.ReplaceSessionContent(t.Context(), "s1", messages, update, nil))
-			} else {
+			default:
 				if route == "batch-transcripts" {
 					d.SetArchiveContent(config.ArchiveContentTranscripts)
 				}
