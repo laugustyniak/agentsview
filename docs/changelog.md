@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-05
+last_edited: 2026-10-07
 title: Changelog
 description: Release history for AgentsView
 ---
@@ -37,6 +37,13 @@ The latest published release is
   them from `~/.omo/agent/sessions` with the Pi parser. Sessions you indexed
   earlier by pointing `PI_DIR` at `~/.omo` stay labeled Pi; remove that
   override so new OMO sessions are not indexed twice.
+- Inspect a session's observed tool-error and empty-result sequences, including
+  retries, recovery calls, retained evidence, measured durations, and transcript
+  links from the session health panel. On a ClickHouse mirror, run
+  `agentsview clickhouse push` with the new version before `clickhouse serve`:
+  until then serve reports the mirror schema as missing
+  `sessions.stored_message_count`. That first push re-sends every session once,
+  and sequences stay unavailable for sessions it has not reached yet.
 - Verify conversation memory through an opt-in live release gate that records a
   synthetic decision, starts a fresh Claude Code or Codex session, and requires
   the client to search, read, answer accurately, and cite the source. Raw
@@ -113,6 +120,9 @@ The latest published release is
 
 **Improvements**
 
+- The daemon sends its anonymous `daemon_active` ping at most once per UTC day,
+  even when it restarts often or several servers share a data directory. A
+  server that stays up sends one ping for each UTC day it runs.
 - The Usage page stays fast after a pricing update. A changed price now
   rebuilds only the sessions that used that model, instead of every session in
   the archive, and a refresh that changes no rates rebuilds nothing. The daemon
@@ -206,6 +216,12 @@ The latest published release is
   used about 99% less memory in AgentsView. Local dates and hours now come
   from the PostgreSQL server's time zone data, which matches AgentsView's for
   current time zones.
+- Hosted raw sync stays fast on a device that has already uploaded many
+  sources. Each acknowledged upload used to reread every object the device had
+  ever uploaded. On a synthetic checkpoint with about 107,000 uploaded objects,
+  acknowledging 36 queued uploads went from about 19 minutes to 1.5 seconds.
+  The first start after upgrading adds an index to the raw sync checkpoint, and
+  earlier AgentsView versions can't open that checkpoint afterward.
 
 **Bug fixes**
 
@@ -216,6 +232,12 @@ The latest published release is
   a session yourself still removes it. Sessions already hidden this way stay
   hidden until their file returns; see
   [Hosted Raw Sync](/docs/hosted-raw-sync/#isolation-and-processing-limits).
+- `recall query` and `recall brief` in `--mode vector` or `--mode hybrid` no
+  longer turn unavailable every time recall extraction writes a new entry. The
+  Recall index may now trail the corpus by up to `recall_max_revision_lag`
+  revisions (a `[vector]` setting, default 256) and still answer; entries newer
+  than the index are found by the lexical half of hybrid search until the next
+  build. Set it to `0` for the previous exact-match behavior.
 - On macOS, `agentsview serve` no longer hangs at `Running initial sync...`
   when a session's working directory is on an external or network drive under
   `/Volumes`. Reading Git metadata there made macOS ask for access to the
