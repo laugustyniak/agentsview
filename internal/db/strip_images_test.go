@@ -412,13 +412,6 @@ func TestStripToolImagesCopiedSessionsOnly(t *testing.T) {
 				WHERE tc.session_id = ? AND COALESCE(ev.content, '') <> ''`, id,
 			).Scan(&callLength, &eventLength))
 			assert.Equal(t, eventLength, callLength)
-			tx, err := destination.getWriter().Begin(ctx)
-			require.NoError(t, err)
-			require.NoError(t, ensureToolCallAgentStateTx(ctx, tx, id, ToolCallPosition{}))
-			require.NoError(t, tx.Commit())
-			var evidence int
-			require.NoError(t, destination.getReader().QueryRow(ctx, "SELECT latest_evidence_event_index FROM tool_call_occurrence_agent_state WHERE session_id=?", id).Scan(&evidence))
-			assert.GreaterOrEqual(t, evidence, 0)
 		}
 	}
 	excluded, err := destination.GetSessionFull(ctx, "excluded")

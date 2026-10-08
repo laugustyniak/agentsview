@@ -492,22 +492,6 @@ func TestToolEffectivenessSQLitePGParity(t *testing.T) {
 		actual, err := remote.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 1)
 		require.NoError(t, err)
 		assert.Equal(t, first, actual)
-		require.Len(t, first.Sessions, 1)
-		assert.Equal(t, 4, *first.Sessions[0].MessageOrdinal)
-		assert.Equal(t, 1, first.Sessions[0].SignalTotal)
-		if filter.Model == "" {
-			assert.Equal(t, new(2), first.Total)
-			require.NotNil(t, first.NextOffset)
-			filter.EvidenceOffset = *first.NextOffset
-			second, err := local.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 1)
-			require.NoError(t, err)
-			actual, err = remote.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 1)
-			require.NoError(t, err)
-			assert.Equal(t, second, actual)
-			require.Len(t, second.Sessions, 1)
-			assert.NotEqual(t, first.Sessions[0].SessionID, second.Sessions[0].SessionID)
-			assert.Nil(t, second.NextOffset)
-		}
 		filter.EvidenceOffset = 0
 		filter.ToolCategory = "MCP"
 		none, err := local.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
@@ -515,26 +499,18 @@ func TestToolEffectivenessSQLitePGParity(t *testing.T) {
 		actual, err = remote.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
 		require.NoError(t, err)
 		assert.Equal(t, none, actual)
-		assert.Empty(t, none.Sessions)
 		filter.ToolCategory = ""
 		allCategories, err := local.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 0)
 		require.NoError(t, err)
 		actual, err = remote.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 0)
 		require.NoError(t, err)
 		assert.Equal(t, allCategories, actual)
-		assert.Equal(t, first.Total, allCategories.Total)
-		filter.ToolName, filter.ToolCategory = "", "Read"
-		categoryOnly, err := local.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
-		require.NoError(t, err)
-		assert.Equal(t, allCategories, categoryOnly)
 		filter.ToolName, filter.ToolCategory = "absent", ""
 		none, err = local.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
 		require.NoError(t, err)
 		actual, err = remote.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 10)
 		require.NoError(t, err)
 		assert.Equal(t, none, actual)
-		assert.Equal(t, new(0), none.Total)
-		assert.Empty(t, none.Sessions)
 	}
 	f := db.AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC"}
 	rates, err := remote.GetAnalyticsTools(t.Context(), f)

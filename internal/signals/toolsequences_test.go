@@ -301,6 +301,25 @@ func TestExtractToolSequences_Repeats(t *testing.T) {
 		Start: 0, End: 5, Identical: true, NearIdentical: true, ToolChanged: true,
 		Ending: ToolSequenceEndingRecovered,
 	}}, got.Sequences)
+	t.Run("successful", func(t *testing.T) {
+		calls := []ToolCallRow{
+			{MessageOrdinal: 0, ToolName: "Grep", InputJSON: `{"q":"a"}`, ResultContent: "matches"},
+			{MessageOrdinal: 1, ToolName: "Grep", InputJSON: `{"q":"a"}`, ResultContent: "matches"},
+			{MessageOrdinal: 2, ToolName: "Grep", InputJSON: `{ "q": "a" }`, ResultContent: "matches"},
+			{MessageOrdinal: 3, ToolName: "Grep", InputJSON: `{"q":"b"}`, ResultContent: "No matches found"},
+			{MessageOrdinal: 4, ToolName: "Grep", InputJSON: `{"q":"b"}`, ResultContent: "No matches found"},
+		}
+		full := ExtractToolSequences(calls, true)
+		count := 0
+		for _, call := range full.Calls {
+			if call.Repeat != ToolRepeatNone {
+				count++
+			}
+		}
+		assert.Equal(t, 3, count)
+		require.Len(t, full.Sequences, 1)
+		assert.Equal(t, 3, full.Sequences[0].Start)
+	})
 }
 
 func TestExtractToolSequences_Endings(t *testing.T) {

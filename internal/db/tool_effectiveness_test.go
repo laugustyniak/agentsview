@@ -190,16 +190,12 @@ func TestToolObservationsReplacementFingerprintAndOrphanCopy(t *testing.T) {
 	after, err := d.ToolCallFingerprint(t.Context(), "recovered")
 	require.NoError(t, err)
 	assert.Equal(t, before, after)
-	f := AnalyticsFilter{From: "2025-06-01", To: "2025-06-02", Timezone: "UTC"}
-	want, err := d.GetAnalyticsTools(t.Context(), f)
-	require.NoError(t, err)
 	replacement := testDB(t)
-	ids, err := replacement.CopyOrphanedDataFromExcluding(d.Path(), nil)
+	_, err = replacement.CopyOrphanedDataFromExcluding(d.Path(), nil)
 	require.NoError(t, err)
-	assert.Len(t, ids, 5)
-	copied, err := replacement.GetAnalyticsTools(t.Context(), f)
+	copied, err := replacement.ToolCallFingerprint(t.Context(), "recovered")
 	require.NoError(t, err)
-	assert.Equal(t, want, copied)
+	assert.Equal(t, before, copied)
 	require.NoError(t, d.UpdateToolObservations(t.Context(), "recovered", []ToolObservation{}))
 	session, err = d.GetSessionFull(t.Context(), "recovered")
 	require.NoError(t, err)
@@ -218,18 +214,8 @@ func TestToolObservationsReplacementFingerprintAndOrphanCopy(t *testing.T) {
 	assert.Equal(t, parseBefore, parseAfter)
 }
 
-func TestToolObservationsClearWhenArchiveOmitsEvidence(t *testing.T) {
-	d := testDB(t)
-	seedToolRateFixture(t, d)
-	d.SetArchiveContent(config.ArchiveContentTranscripts)
-	require.NoError(t, d.UpdateToolObservations(t.Context(), "recovered", nil))
-	messages, err := d.GetAllMessages(t.Context(), "recovered")
-	require.NoError(t, err)
-	assert.Nil(t, messages[0].ToolCalls[0].ObservedOutcome)
-}
-
 func TestToolObservationsFullReplaceWritesWithCalls(t *testing.T) {
-	for _, route := range []string{"single", "batch", "batch-transcripts"} {
+	for _, route := range []string{"single", "batch", "batch-transcripts", "observations-transcripts"} {
 		t.Run(route, func(t *testing.T) {
 			d := testDB(t)
 			insertSession(t, d, "s1", "project-a")
@@ -239,7 +225,13 @@ func TestToolObservationsFullReplaceWritesWithCalls(t *testing.T) {
 			}))
 			messages := []Message{{SessionID: "s1", Ordinal: 3, Role: "assistant", ToolCalls: []ToolCall{{ToolName: "Grep", Category: "Grep", ObservedOutcome: new("content")}}}}
 			update := SessionSignalUpdate{ToolObservations: []ToolObservation{{MessageOrdinal: 3, Outcome: "empty", Repeat: "none", SequenceEnding: new("abandoned")}}}
-			if route == "single" {
+			if route == "observations-transcripts" {
+				_, err := d.getWriter().Exec(t.Context(), "DROP TRIGGER reject_observation_update")
+				require.NoError(t, err)
+				require.NoError(t, d.ReplaceSessionContent(t.Context(), "s1", messages, update, nil))
+				d.SetArchiveContent(config.ArchiveContentTranscripts)
+				require.NoError(t, d.UpdateToolObservations(t.Context(), "s1", nil))
+			} else if route == "single" {
 				require.NoError(t, d.ReplaceSessionContent(t.Context(), "s1", messages, update, nil))
 			} else {
 				if route == "batch-transcripts" {
@@ -255,7 +247,7 @@ func TestToolObservationsFullReplaceWritesWithCalls(t *testing.T) {
 			stored, err := d.GetAllMessages(t.Context(), "s1")
 			require.NoError(t, err)
 			require.Len(t, stored, 1)
-			if route == "batch-transcripts" {
+			if route == "batch-transcripts" || route == "observations-transcripts" {
 				assert.Nil(t, stored[0].ToolCalls[0].ObservedOutcome)
 			} else {
 				assert.Equal(t, new("empty"), stored[0].ToolCalls[0].ObservedOutcome)

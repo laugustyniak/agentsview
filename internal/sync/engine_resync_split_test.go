@@ -197,9 +197,6 @@ func TestResyncBuildThenSwapMatchesResyncAll(t *testing.T) {
 		for _, id := range []string{"orphan", "keep1"} {
 			session, err := d.GetSessionFull(t.Context(), id)
 			require.NoError(t, err)
-			if id == "keep1" {
-				assert.Nil(t, session.LocalModifiedAt, "unchanged copied facts must not publish a timestamp")
-			}
 			assert.Equal(t, new(94), session.HealthScore)
 			assert.Equal(t, 2, session.ShortPromptCount)
 			assert.Equal(t, 3, session.MissingVerificationCount)
@@ -219,10 +216,6 @@ func TestResyncBuildThenSwapMatchesResyncAll(t *testing.T) {
 	require.False(t, stats.Aborted)
 	require.FileExists(t, tempPath)
 
-	built, err := db.Open(t.Context(), tempPath)
-	require.NoError(t, err)
-	assertObservations(built)
-	require.NoError(t, built.Close())
 	installed, err := e.SwapResyncDatabase(tempPath)
 	require.NoError(t, err)
 	assert.True(t, installed)

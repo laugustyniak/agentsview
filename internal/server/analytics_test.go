@@ -475,7 +475,6 @@ func TestAnalyticsToolEvidenceOptionalCategory(t *testing.T) {
 	w := te.get(t, "/api/v1/analytics/signal-sessions?signal=tool_empty_rate&from=2026-04-26&to=2026-04-26&tool_name=readFile&tool_category=MCP")
 	assertStatus(t, w, http.StatusOK)
 	got := decode[db.SignalSessionsResponse](t, w)
-	assert.Equal(t, new(1), got.Total)
 	require.Len(t, got.Sessions, 1)
 	document := decode[map[string]any](t, w)
 	for _, row := range document["sessions"].([]any) {

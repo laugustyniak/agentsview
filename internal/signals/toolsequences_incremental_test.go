@@ -100,19 +100,9 @@ func TestToolSequenceRepeatsIncludeSuccessfulCalls(t *testing.T) {
 		{MessageOrdinal: 3, ToolName: "Grep", InputJSON: `{"q":"b"}`, ResultContent: "No matches found"},
 		{MessageOrdinal: 4, ToolName: "Grep", InputJSON: `{"q":"b"}`, ResultContent: "No matches found"},
 	}
-	full := ExtractToolSequences(calls, true)
-	count := 0
-	for _, call := range full.Calls {
-		if call.Repeat != ToolRepeatNone {
-			count++
-		}
-	}
-	assert.Equal(t, 3, count)
-	require.Len(t, full.Sequences, 1)
-	assert.Equal(t, 3, full.Sequences[0].Start)
 	state := SeedIncrementalState(calls[:1], nil, "", "", nil, nil, 0, 0, 0)
 	_, changes := state.FoldToolSequences(calls[1:], nil, true)
-	count = 0
+	count := 0
 	for _, change := range changes {
 		if change.Call != nil && change.Call.Repeat != ToolRepeatNone {
 			count++

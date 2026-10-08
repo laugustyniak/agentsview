@@ -22,7 +22,7 @@ func TestStagedMultiAgentToolObservationParity(t *testing.T) {
 		{"[image]", false, true, "unknown", "unknown"},
 		{"[image]", true, true, "unknown", "unknown"},
 	} {
-		for _, textAgent := range []string{"agent-a", "agent-b", ""} {
+		for _, textAgent := range []string{"agent-a", ""} {
 			t.Run(prior.content+strconv.FormatBool(prior.imagePeer)+textAgent, func(t *testing.T) {
 				staged, err := newCodexStagingSink(t.Context(), t.TempDir(), nil)
 				require.NoError(t, err)

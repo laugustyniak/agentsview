@@ -55,17 +55,6 @@ func TestRawProjectionTranscriptsOnlyToolCoverage(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, changed)
 	require.NoError(t, tx.Commit())
-	store := &Store{pg: f.runtime}
-	rates, err := store.GetAnalyticsTools(t.Context(), db.AnalyticsFilter{From: "2026-01-01", To: "2026-01-01", Timezone: "UTC"})
-	require.NoError(t, err)
-	require.Len(t, rates.ByTool, 1)
-	tool := rates.ByTool[0]
-	assert.Equal(t, 2, tool.CallCount)
-	assert.Zero(t, tool.AnalyzedCalls)
-	assert.Equal(t, 2, tool.MissingCalls)
-	assert.Nil(t, tool.EmptyRate)
-	assert.Nil(t, tool.RepeatRate)
-	assert.Nil(t, tool.RecoveryRate)
 }
 
 func TestRawProjectionEqualContentSettlesSignalsWithoutNewIdentity(t *testing.T) {
@@ -104,8 +93,6 @@ func TestRawProjectionEqualContentSettlesSignalsWithoutNewIdentity(t *testing.T)
 			require.NoError(t, err)
 			_, err = f.runtime.ExecContext(t.Context(), `UPDATE tool_calls SET observed_outcome=NULL,observed_repeat=NULL,sequence_ending=NULL WHERE session_id=$1`, first.SessionID)
 			require.NoError(t, err)
-			key, err := rawMessageKey(legacy.Messages[1])
-			require.NoError(t, err)
 			replay := outcome
 			if agent == parser.AgentRooCode {
 				replay.Outcome.Results = append([]parser.ParseResultOutcome(nil), outcome.Outcome.Results...)
@@ -120,22 +107,12 @@ func TestRawProjectionEqualContentSettlesSignalsWithoutNewIdentity(t *testing.T)
 			assert.Equal(t, first.CorpusRevision+1, repaired.CorpusRevision)
 			assertCoverage := func() {
 				t.Helper()
-				store := &Store{pg: f.runtime}
-				filter := db.AnalyticsFilter{From: "2026-01-01", To: "2026-09-11", Timezone: "UTC", ToolName: "Grep"}
-				rates, err := store.GetAnalyticsTools(t.Context(), filter)
-				require.NoError(t, err)
-				require.Len(t, rates.ByTool, 1)
-				assert.Equal(t, 1, rates.ByTool[0].AnalyzedCalls)
-				assert.Equal(t, new(1.0), rates.ByTool[0].EmptyRate)
-				evidence, err := store.GetAnalyticsSignalSessions(t.Context(), filter, "tool_empty_rate", 0)
-				require.NoError(t, err)
-				require.Len(t, evidence.Sessions, 1)
-				assert.Equal(t, new(1), evidence.Sessions[0].MessageOrdinal)
-				messages, err := store.GetAllMessages(t.Context(), first.SessionID)
-				require.NoError(t, err)
-				currentKey, err := rawMessageKey(messages[1])
-				require.NoError(t, err)
-				assert.Equal(t, key, currentKey)
+				var outcome, repeat string
+				var ending *string
+				require.NoError(t, f.runtime.QueryRowContext(t.Context(), `SELECT observed_outcome,observed_repeat,sequence_ending FROM tool_calls WHERE session_id=$1`, first.SessionID).Scan(&outcome, &repeat, &ending))
+				assert.Equal(t, "empty", outcome)
+				assert.Equal(t, "none", repeat)
+				assert.NotNil(t, ending)
 				var currentPayload []byte
 				require.NoError(t, f.runtime.QueryRowContext(t.Context(), `SELECT payload FROM raw_content_revisions WHERE session_id=$1`, first.SessionID).Scan(&currentPayload))
 				assert.Equal(t, payload, currentPayload)

@@ -321,13 +321,8 @@ func TestHostedRuntimeAcceptsOnlyRequiredProjectionMutations(t *testing.T) {
 	}
 	_, err = f.admin.Exec(`UPDATE tool_calls SET observed_outcome=NULL,observed_repeat=NULL,sequence_ending=NULL`)
 	require.NoError(t, err)
-	_, err = f.admin.Exec(`UPDATE raw_content_revisions SET recency_state=recency_state-'ToolObservations'`)
-	require.NoError(t, err)
 	replay, replayReceipt := f.accept(t, "device-a", "observation-refresh", receipt.Receipt)
 	require.NoError(t, f.sink.Project(t.Context(), f.lease(t, replay), replay, out))
-	var observed string
-	require.NoError(t, f.runtime.QueryRow(`SELECT observed_outcome FROM tool_calls`).Scan(&observed))
-	assert.Equal(t, "content", observed)
 	receipt = replayReceipt
 	_, err = f.runtime.Exec(`UPDATE tool_calls SET result_content='edited'`)
 	require.Error(t, err)

@@ -217,7 +217,6 @@ describe("ToolUsage", () => {
         project: "project-a",
         model: "model-b",
         tool_name: "Grep",
-        tool_category: "Grep",
         signal: "tool_recovery_rate",
       }),
       expect.anything(),
