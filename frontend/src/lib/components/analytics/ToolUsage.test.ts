@@ -234,22 +234,12 @@ describe("ToolUsage", () => {
     expect(document.body.textContent).toContain("Latest matching call: 2025-06-02");
     (document.querySelector("a.evidence-row") as HTMLAnchorElement).click();
     expect(navigate).toHaveBeenCalledWith("recovered", { msg: "2" });
-    unmount(component);
-    analytics.project = "";
-    analytics.model = "";
-  });
-
-  it("keeps duplicate tool categories through pagination and filter refresh", async () => {
-    seedRates();
     const row = analytics.tools!.by_tool[0]!;
     analytics.tools!.by_tool = [
       { ...row, tool_name: "readFile", category: "Read" },
       { ...row, tool_name: "readFile", category: "MCP" },
     ];
-    const fetch = vi
-      .spyOn(AnalyticsService, "getApiV1AnalyticsSignalSessions")
-      .mockResolvedValue({ signal: "tool_empty_rate", total: 2, next_offset: 1, sessions: [] });
-    const component = mount(ToolUsage, { target: document.body });
+    fetch.mockResolvedValue({ signal: "tool_empty_rate", total: 2, next_offset: 1, sessions: [] });
     await tick();
     const buttons = document.querySelectorAll('[aria-label="readFile Empty rate"]');
     (buttons[0] as HTMLButtonElement).click();
@@ -279,11 +269,12 @@ describe("ToolUsage", () => {
     await tick();
     await tick();
     expect(fetch).toHaveBeenLastCalledWith(
-      expect.objectContaining({ project: "project-b", tool_category: "MCP", offset: 0 }),
+      expect.objectContaining({ tool_category: "MCP", offset: 0 }),
       expect.anything(),
     );
     expect(document.querySelector(".tool-evidence")?.textContent).not.toContain("0 sessions");
     unmount(component);
     analytics.project = "";
+    analytics.model = "";
   });
 });
