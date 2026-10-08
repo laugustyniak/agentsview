@@ -28,13 +28,12 @@ func TestReparseHonorsReceivingArchiveDeletions(t *testing.T) {
 				dbtest.WriteTestFile(t, path, []byte(testjsonl.NewSessionBuilder().
 					AddClaudeUserWithSessionID("2026-01-01T00:00:00Z", "archived history", id).String()))
 			}
+			require.NoError(t, database.EnableArchiveOnly(ctx))
 			archive, err := Open(ctx, database, data, nil)
 			require.NoError(t, err)
 			defer archive.Close()
-			report, err := archive.Import(ctx, ImportSpec{
-				DeviceID: foreign, Machine: "foreign",
-				Roots: []RootSpec{{ID: "claude", Provider: "claude", Path: root, OriginalPath: root}},
-			})
+			capture := newImportCapture(t, foreign, "foreign", RootSpec{Provider: "claude", Path: root})
+			report, err := archive.Import(ctx, loadTestCapture(t, &capture))
 			require.NoError(t, err)
 			require.Empty(t, report.Gaps)
 			sources, err := database.ListRawArchiveSources(ctx, "", 10)

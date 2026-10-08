@@ -7,7 +7,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -73,10 +72,11 @@ func loadCaptureSpec(ctx context.Context, path string) (ImportSpec, error) {
 // immutable capture. Unsupported files remain supplemental and are recoverable.
 func (a *Archive) Import(ctx context.Context, spec ImportSpec) (Report, error) {
 	var report Report
-	if spec.capture != nil {
-		report.CaptureID = spec.capture.CaptureID
-		report.Preflight = &spec.capture.Preflight
+	if spec.capture == nil {
+		return report, errors.New("validated capture is required; load it with LoadImportSpec")
 	}
+	report.CaptureID = spec.capture.CaptureID
+	report.Preflight = &spec.capture.Preflight
 	expected := make(map[string]CaptureFile, len(spec.inventory))
 	for _, file := range spec.inventory {
 		expected[file.RootID+"/"+file.Path] = file
@@ -142,23 +142,13 @@ func (a *Archive) Import(ctx context.Context, spec ImportSpec) (Report, error) {
 			if err != nil {
 				return err
 			}
-			ref, err := hashReader(ctx, f)
-			if err != nil {
-				return err
+			key := input.ID + "/" + filepath.ToSlash(rel)
+			want, ok := expected[key]
+			if !ok || want.Size != info.Size() {
+				return errors.New("capture changed after inventory verification")
 			}
-			if ref.Length != info.Size() {
-				return errors.New("capture changed while hashing")
-			}
-			if spec.capture != nil {
-				want, ok := expected[input.ID+"/"+filepath.ToSlash(rel)]
-				if !ok || want.SHA256 != ref.SHA256 || want.Size != ref.Length {
-					return errors.New("capture changed after inventory verification")
-				}
-				delete(expected, input.ID+"/"+filepath.ToSlash(rel))
-			}
-			if _, err = f.Seek(0, io.SeekStart); err != nil {
-				return err
-			}
+			delete(expected, key)
+			ref := rawsync.ObjectRef{SHA256: want.SHA256, Length: want.Size}
 			// Create verifies the declared digest even on a retry; custody is only
 			// recorded after the complete stream has been consumed and checked.
 			if _, err = a.objects.PutObject(ctx, a.tenant, ref, contextReader{ctx, f}); err != nil {
@@ -190,16 +180,10 @@ func (a *Archive) Import(ctx context.Context, spec ImportSpec) (Report, error) {
 	if len(expected) > 0 {
 		return report, errors.New("capture files disappeared after verification")
 	}
-	if spec.capture != nil {
-		if err := a.retainCaptureEvidence(ctx, spec); err != nil {
-			return report, err
-		}
+	if err := a.retainCaptureEvidence(ctx, spec); err != nil {
+		return report, err
 	}
-	var suppressions []db.RawArchiveSuppression
-	if spec.capture != nil {
-		suppressions = spec.capture.Preflight.Deletions
-	}
-	if err := a.database.RegisterRawArchiveDevice(ctx, spec.DeviceID, spec.Machine, suppressions); err != nil {
+	if err := a.database.RegisterRawArchiveDevice(ctx, spec.DeviceID, spec.Machine, spec.capture.Preflight.Deletions); err != nil {
 		if !errors.Is(err, db.ErrRawArchiveDeletionConflict) {
 			return report, err
 		}

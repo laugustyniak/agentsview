@@ -205,7 +205,8 @@ func (a *Archive) reparseSource(ctx context.Context, scratch *db.DB, scratchDir 
 			if root.DeviceID == owner && existing.FilePath != nil && slices.Contains(prepared.SourcePaths, *existing.FilePath) {
 				s.FilePath = existing.FilePath
 			}
-			machineMatches := existing.Machine == root.DeviceID || (root.DeviceID == owner && aliases[existing.Machine] == owner)
+			machineMatches := existing.Machine == root.DeviceID ||
+				(root.DeviceID == owner && (existing.Machine == "" || existing.Machine == "local" || aliases[existing.Machine] == owner))
 			if (!known && root.DeviceID != owner) || existing.Agent != root.Provider || !machineMatches || existing.FilePath == nil || s.FilePath == nil || *existing.FilePath != *s.FilePath {
 				return false, fmt.Errorf("session identity conflicts with a different source: %s", s.ID)
 			}

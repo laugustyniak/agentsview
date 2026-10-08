@@ -16,6 +16,9 @@ bindings, a checksummed inventory and a closed application database. It reuses
 the raw capturer's online SQLite backup without its upload spool budget, and
 reads only allowlisted identity/receipt fields from raw-sync checkpoints.
 Configuration loading and source database reads never migrate the source.
+Identity reuse validates the previous descriptor without reading its retained
+files. An explicit binding preserves the application root's original path when
+its source data directory moves; the current path remains capture provenance.
 
 A digest binds the inventory to its source and root identities. Import checks
 all captured files and rechecks each file against that inventory while storing
@@ -49,7 +52,9 @@ restore. Sessions from other installations use `installation~parser-id`
 identities and retain their original machine attribution. Their trash and
 permanent-delete records prevent raw files from bringing those sessions back.
 Other foreign curation remains in the captured database; it is not merged into
-browsable state.
+browsable state. Empty and `local` machine sentinels denote the seed owner.
+Reparse recognizes them only for that owner's sources, with the same provider
+and path checks as other existing sessions.
 
 ## Storage and reuse
 
@@ -59,7 +64,9 @@ file inventories, immutable source acceptance, current heads, and parse status.
 Those records survive database rebuilds. Moving the capture changes its import
 path, not those identities.
 
-The importer hashes and streams every regular file directly into the vault. It
+The importer requires a validated capture. After whole-package verification, it
+streams each file into the vault using the inventory's hash and size. The vault
+checks the stored stream against both before custody is recorded. The importer
 then uses Claude/Codex capture plans and the hosted raw manifest format to
 accept complete sources. Objects and manifests are stored before SQLite
 acceptance. Retries reuse acceptance. Conflicting imports retain evidence but do
@@ -85,7 +92,10 @@ project discovery is disabled.
 
 The CLI holds the existing offline writer lock. It refuses to run while the
 daemon owns the archive; there is no daemon/worker vault handoff in this
-version. Normal startup resync never opens this raw vault.
+version. Normal startup resync never opens this raw vault. Archive commands
+require the persisted archive-only marker before opening raw storage. An
+ordinary database is refused, not silently converted. Seed import and restore
+create the dedicated archive.
 
 Each explicit reparse batch creates one consistent full SQLite copy alongside
 the working database. The normal sync engine writes selected materialized

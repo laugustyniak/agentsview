@@ -73,6 +73,74 @@ func LoadCapture(ctx context.Context, path string) (CaptureDescriptor, error) {
 	return descriptor, err
 }
 
+func readCaptureJSON(ctx context.Context, root *os.Root, name string, limit int64, out any) ([]byte, error) {
+	info, err := root.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > limit {
+		return nil, errors.New("invalid capture metadata file")
+	}
+	f, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(contextReader{ctx, f}, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > limit {
+		return nil, errors.New("capture metadata exceeds size limit")
+	}
+	return b, json.Unmarshal(b, out, json.RejectUnknownMembers(true))
+}
+
+// readCaptureDescriptor validates identity metadata without requiring the old
+// payload. Import and recovery additionally verify the inventory in readCapture.
+func readCaptureDescriptor(ctx context.Context, root *os.Root, name string) (CaptureDescriptor, map[string]RootSpec, error) {
+	var d CaptureDescriptor
+	var err error
+	if d.data, err = readCaptureJSON(ctx, root, name, 4<<20, &d); err != nil {
+		return d, nil, err
+	}
+	if d.Version != captureVersion || d.CompletedAt.IsZero() || d.StartedAt.IsZero() || d.CompletedAt.Before(d.StartedAt) {
+		return d, nil, errors.New("unsupported or incomplete capture descriptor")
+	}
+	captureID, err := hex.DecodeString(d.CaptureID)
+	if err != nil || len(captureID) != sha256.Size {
+		return d, nil, errors.New("invalid capture ID")
+	}
+	if err := validateRecoveryIdentity([]byte(d.Source.DeviceID)); err != nil {
+		return d, nil, err
+	}
+	if strings.TrimSpace(d.Source.Machine) == "" || len(d.Source.Roots) < 2 {
+		return d, nil, errors.New("capture source bindings are incomplete")
+	}
+	roots := make(map[string]RootSpec)
+	for _, r := range d.Source.Roots {
+		if _, exists := roots[r.ID]; exists || r.ID == "" || r.Path != filepath.ToSlash(filepath.Join("roots", r.ID)) || !filepath.IsLocal(r.Path) {
+			return d, nil, errors.New("invalid capture root binding")
+		}
+		if (r.Provider != "claude" && r.Provider != "codex" && r.Provider != "files") || r.OriginalPath == "" || r.ConfiguredPath == "" {
+			return d, nil, errors.New("invalid capture source binding")
+		}
+		if _, err := rawsync.NewAuthIdentity(r.ID, d.Source.DeviceID); err != nil {
+			return d, nil, err
+		}
+		for _, dir := range r.SessionDirs {
+			if !filepath.IsLocal(dir) {
+				return d, nil, errors.New("invalid capture session directory")
+			}
+		}
+		roots[r.ID] = r
+	}
+	if root, ok := roots["application"]; !ok || root.Provider != "files" {
+		return d, nil, errors.New("capture application binding is missing")
+	}
+	return d, roots, nil
+}
+
 func readCapture(ctx context.Context, path string) (CaptureDescriptor, captureInventory, error) {
 	var d CaptureDescriptor
 	var inventory captureInventory
@@ -81,35 +149,11 @@ func readCapture(ctx context.Context, path string) (CaptureDescriptor, captureIn
 		return d, inventory, err
 	}
 	defer root.Close()
-	read := func(name string, limit int64, out any) ([]byte, error) {
-		info, err := root.Lstat(name)
-		if err != nil {
-			return nil, err
-		}
-		if !info.Mode().IsRegular() || info.Size() > limit {
-			return nil, errors.New("invalid capture metadata file")
-		}
-		f, err := root.Open(name)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-		b, err := io.ReadAll(io.LimitReader(contextReader{ctx, f}, limit+1))
-		if err != nil {
-			return nil, err
-		}
-		if int64(len(b)) > limit {
-			return nil, errors.New("capture metadata exceeds size limit")
-		}
-		return b, json.Unmarshal(b, out, json.RejectUnknownMembers(true))
-	}
-	if d.data, err = read(filepath.Base(path), 4<<20, &d); err != nil {
+	d, roots, err := readCaptureDescriptor(ctx, root, filepath.Base(path))
+	if err != nil {
 		return d, inventory, err
 	}
-	if d.Version != captureVersion || d.CompletedAt.IsZero() || d.StartedAt.IsZero() || d.CompletedAt.Before(d.StartedAt) {
-		return d, inventory, errors.New("unsupported or incomplete capture descriptor")
-	}
-	b, err := read("inventory.json", 256<<20, &inventory)
+	b, err := readCaptureJSON(ctx, root, "inventory.json", 256<<20, &inventory)
 	if err != nil {
 		return d, inventory, err
 	}
@@ -118,30 +162,6 @@ func readCapture(ctx context.Context, path string) (CaptureDescriptor, captureIn
 		return d, inventory, errors.New("capture inventory does not match descriptor")
 	}
 	inventory.data = b
-	if err := validateRecoveryIdentity([]byte(d.Source.DeviceID)); err != nil {
-		return d, inventory, err
-	}
-	if strings.TrimSpace(d.Source.Machine) == "" || len(d.Source.Roots) < 2 {
-		return d, inventory, errors.New("capture source bindings are incomplete")
-	}
-	roots := make(map[string]RootSpec)
-	for _, r := range d.Source.Roots {
-		if _, exists := roots[r.ID]; exists || r.ID == "" || r.Path != filepath.ToSlash(filepath.Join("roots", r.ID)) || !filepath.IsLocal(r.Path) {
-			return d, inventory, errors.New("invalid capture root binding")
-		}
-		if _, err := rawsync.NewAuthIdentity(r.ID, d.Source.DeviceID); err != nil {
-			return d, inventory, err
-		}
-		for _, dir := range r.SessionDirs {
-			if !filepath.IsLocal(dir) {
-				return d, inventory, errors.New("invalid capture session directory")
-			}
-		}
-		roots[r.ID] = r
-	}
-	if root, ok := roots["application"]; !ok || root.Provider != "files" {
-		return d, inventory, errors.New("capture application binding is missing")
-	}
 	expected := make(map[string]CaptureFile, len(inventory.Files))
 	for _, file := range inventory.Files {
 		binding, ok := roots[file.RootID]
@@ -195,7 +215,7 @@ func readCapture(ctx context.Context, path string) (CaptureDescriptor, captureIn
 		return d, inventory, errors.New("capture inventory has missing files")
 	}
 	var report CaptureDescriptor
-	if _, err := read("roots/application/capture-report.json", 4<<20, &report); err != nil {
+	if _, err := readCaptureJSON(ctx, root, "roots/application/capture-report.json", 4<<20, &report); err != nil {
 		return d, inventory, err
 	}
 	want := d

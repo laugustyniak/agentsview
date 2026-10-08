@@ -184,6 +184,13 @@ func withRawArchive(cmd *cobra.Command, run func(*rawarchive.Archive) error) (re
 	if err != nil {
 		return err
 	}
+	archiveOnly, err := db.ArchiveOnlyAt(cmd.Context(), cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	if !archiveOnly {
+		return rawarchive.ErrArchiveOnlyRequired
+	}
 	database, lock, err := openWriteDB(cmd.Context(), cfg)
 	if err != nil {
 		return err

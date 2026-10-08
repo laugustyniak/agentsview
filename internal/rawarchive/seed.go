@@ -171,7 +171,8 @@ func importSeed(ctx context.Context, path string, spec ImportSpec, settings Reco
 		return report, err
 	}
 	for _, candidate := range candidates {
-		if candidate.Machine != spec.DeviceID && aliases[candidate.Machine] != spec.DeviceID {
+		if candidate.Machine != "" && candidate.Machine != "local" &&
+			candidate.Machine != spec.DeviceID && aliases[candidate.Machine] != spec.DeviceID {
 			report.UnownedMachines = append(report.UnownedMachines, candidate)
 		}
 	}

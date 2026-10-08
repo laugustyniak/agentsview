@@ -49,6 +49,171 @@ func TestCaptureIdentityContinuity(t *testing.T) {
 	assert.NoDirExists(t, opts.Destination)
 }
 
+func TestCaptureIdentityReuseWithoutOldPayload(t *testing.T) {
+	for _, condition := range []string{"descriptor-only", "changed-payload"} {
+		t.Run(condition, func(t *testing.T) {
+			opts := captureFixture(t)
+			first, err := Capture(t.Context(), opts)
+			require.NoError(t, err)
+			identity := filepath.Join(opts.Destination, "capture.json")
+			if condition == "descriptor-only" {
+				data, err := os.ReadFile(identity)
+				require.NoError(t, err)
+				identity = filepath.Join(t.TempDir(), "capture.json")
+				require.NoError(t, os.WriteFile(identity, data, 0o600))
+				require.NoError(t, os.RemoveAll(opts.Destination))
+			} else {
+				dbtest.WriteTestFile(t, filepath.Join(opts.Destination, first.Source.Roots[0].Path,
+					"projects", "project-a", "saved.jsonl"), []byte("changed old copy"))
+			}
+			// Identity reuse does not establish custody of the old capture.
+			_, err = LoadImportSpec(t.Context(), identity)
+			require.Error(t, err)
+			opts.IdentityFrom = identity
+			opts.Destination = filepath.Join(t.TempDir(), "again")
+			second, err := Capture(t.Context(), opts)
+			require.NoError(t, err)
+			assert.Equal(t, first.Source.DeviceID, second.Source.DeviceID)
+			assert.Equal(t, first.Source.Roots, second.Source.Roots)
+			assert.Empty(t, second.NewIdentities)
+		})
+	}
+}
+
+func TestCaptureAfterApplicationDirectoryMove(t *testing.T) {
+	ctx := t.Context()
+	opts := captureFixture(t)
+	first, err := Capture(ctx, opts)
+	require.NoError(t, err)
+	opts.IdentityFrom = filepath.Join(opts.Destination, "capture.json")
+	spec, err := LoadImportSpec(ctx, opts.IdentityFrom)
+	require.NoError(t, err)
+	database := dbtest.OpenTestDB(t)
+	require.NoError(t, database.EnableArchiveOnly(ctx))
+	archive, err := Open(ctx, database, t.TempDir(), nil)
+	require.NoError(t, err)
+	defer archive.Close()
+	_, err = archive.Import(ctx, spec)
+	require.NoError(t, err)
+
+	original, err := filepath.EvalSymlinks(opts.DataDir)
+	require.NoError(t, err)
+	moved := filepath.Join(t.TempDir(), "moved")
+	require.NoError(t, os.Rename(original, moved))
+	moved, err = filepath.EvalSymlinks(moved)
+	require.NoError(t, err)
+	opts.DataDir = moved
+	opts.Destination = filepath.Join(t.TempDir(), "again")
+	second, err := Capture(ctx, opts)
+	require.NoError(t, err)
+	assert.Equal(t, first.Source.DeviceID, second.Source.DeviceID)
+	for _, root := range second.Source.Roots {
+		if root.ID == "application" {
+			assert.Equal(t, original, root.OriginalPath)
+			assert.Equal(t, moved, root.ConfiguredPath)
+		}
+	}
+	spec, err = LoadImportSpec(ctx, filepath.Join(opts.Destination, "capture.json"))
+	require.NoError(t, err)
+	_, err = archive.Import(ctx, spec)
+	require.NoError(t, err, "moving application data preserves its accepted root identity")
+}
+
+func TestCaptureOmitsProviderCredentials(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, dir string
+		omitIDE             bool
+	}{
+		{"claude-home", "claude", "projects", true},
+		{"claude-project", "claude", "projects/project-a", false},
+		{"codex-home", "codex", "sessions", false},
+		{"supplemental", "files", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := captureFixture(t)
+			root := filepath.Dir(opts.Roots[0].Path)
+			selected := filepath.Join(root, filepath.FromSlash(tc.dir))
+			transcript := "projects/project-b/ide/saved.jsonl"
+			require.NoError(t, os.MkdirAll(selected, 0o700))
+			opts.Roots = []RootSpec{{Provider: tc.provider, Path: selected}}
+			if tc.name == "claude-project" {
+				root = selected
+				transcript = "nested/ide/saved.jsonl"
+			}
+			dbtest.WriteTestFile(t, filepath.Join(root, ".git-credentials"), []byte("synthetic credential"))
+			dbtest.WriteTestFile(t, filepath.Join(root, "ide", "51234.lock"), []byte(`{"authToken":"synthetic-token"}`))
+			dbtest.WriteTestFile(t, filepath.Join(root, "file-history", "version.lock"), []byte("retained companion"))
+			dbtest.WriteTestFile(t, filepath.Join(root, filepath.FromSlash(transcript)), []byte("retained transcript"))
+			descriptor, err := Capture(t.Context(), opts)
+			require.NoError(t, err)
+			captured := filepath.Join(opts.Destination, descriptor.Source.Roots[0].Path)
+			assert.NoFileExists(t, filepath.Join(captured, ".git-credentials"))
+			assert.Contains(t, descriptor.Omissions, CaptureOmission{
+				RootID: descriptor.Source.Roots[0].ID, Path: ".git-credentials", Reason: "credential or runtime settings file",
+			})
+			if tc.omitIDE {
+				assert.NoDirExists(t, filepath.Join(captured, "ide"))
+				assert.Contains(t, descriptor.Omissions, CaptureOmission{
+					RootID: descriptor.Source.Roots[0].ID, Path: "ide", Reason: "Claude IDE runtime state",
+				})
+			} else {
+				assert.FileExists(t, filepath.Join(captured, "ide", "51234.lock"))
+			}
+			for path, want := range map[string]string{
+				"file-history/version.lock": "retained companion",
+				transcript:                  "retained transcript",
+			} {
+				body, err := os.ReadFile(filepath.Join(captured, filepath.FromSlash(path)))
+				require.NoError(t, err)
+				assert.Equal(t, want, string(body))
+			}
+		})
+	}
+}
+
+func TestCaptureIdentityRejectsInvalidDescriptor(t *testing.T) {
+	opts := captureFixture(t)
+	first, err := Capture(t.Context(), opts)
+	require.NoError(t, err)
+	for _, fault := range []string{"version", "incomplete", "identity", "duplicate-root", "root-path", "session-path", "application-origin", "provider", "oversize"} {
+		t.Run(fault, func(t *testing.T) {
+			d := first
+			d.Source.Roots = append([]RootSpec(nil), first.Source.Roots...)
+			switch fault {
+			case "version":
+				d.Version++
+			case "incomplete":
+				d.CompletedAt = d.StartedAt.Add(-1)
+			case "identity":
+				d.Source.DeviceID = "invalid"
+			case "duplicate-root":
+				d.Source.Roots = append(d.Source.Roots, d.Source.Roots[0])
+			case "root-path":
+				d.Source.Roots[0].Path = "../payload"
+			case "session-path":
+				d.Source.Roots[0].SessionDirs = []string{"../payload"}
+			case "application-origin":
+				d.Source.Roots[1].OriginalPath = ""
+			case "provider":
+				d.Source.Roots[0].Provider = "invalid"
+			}
+			data, err := json.Marshal(d)
+			require.NoError(t, err)
+			identity := filepath.Join(t.TempDir(), "capture.json")
+			require.NoError(t, os.WriteFile(identity, data, 0o600))
+			if fault == "oversize" {
+				require.NoError(t, os.Truncate(identity, (4<<20)+1))
+			}
+			next := opts
+			next.IdentityFrom = identity
+			next.Destination = filepath.Join(t.TempDir(), "next")
+			_, err = Capture(t.Context(), next)
+			require.Error(t, err)
+			assert.NoDirExists(t, next.Destination)
+		})
+	}
+}
+
 func TestCapturePreservesRawSyncRoot(t *testing.T) {
 	opts := captureFixture(t)
 	path := filepath.Join(opts.DataDir, "raw-sync", "checkpoint.db")

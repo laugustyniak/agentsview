@@ -109,6 +109,16 @@ func (d *DB) ListRawArchiveFiles(ctx context.Context, afterID int64, limit int) 
 	return readRawArchiveFiles(rows, err)
 }
 
+// HasConflictingRawArchiveFiles reports whether flat extraction would need to
+// write different retained versions to the same path.
+func (d *DB) HasConflictingRawArchiveFiles(ctx context.Context) (bool, error) {
+	var conflict bool
+	err := d.getReader().QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM raw_archive_files GROUP BY root_id,path HAVING count(*) > 1
+	)`).Scan(&conflict)
+	return conflict, err
+}
+
 // RawArchiveCaptureEvidence finds the retained descriptor and inventory even
 // when no source from that capture was accepted. Three rows expose ambiguity
 // without reading every retained version.

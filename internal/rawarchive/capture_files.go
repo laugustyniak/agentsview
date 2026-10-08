@@ -10,12 +10,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"go.kenn.io/agentsview/internal/rawcapture"
 )
 
-func captureTree(ctx context.Context, source, target, rootID string) ([]CaptureFile, []CaptureOmission, error) {
+func captureTree(ctx context.Context, source, target string, binding RootSpec) ([]CaptureFile, []CaptureOmission, error) {
 	root, err := os.OpenRoot(source)
 	if err != nil {
 		return nil, nil, err
@@ -39,13 +40,15 @@ func captureTree(ctx context.Context, source, target, rootID string) ([]CaptureF
 		reason := ""
 		if entry.Type()&os.ModeSymlink != 0 {
 			reason = "symlink not followed"
+		} else if binding.Provider == "claude" && slices.Contains(binding.SessionDirs, "projects") && name == "ide" {
+			reason = "Claude IDE runtime state"
 		} else if credentialCaptureName(entry.Name()) {
 			reason = "credential or runtime settings file"
 		} else if !entry.IsDir() && !entry.Type().IsRegular() {
 			reason = "special file"
 		}
 		if reason != "" {
-			omitted = append(omitted, CaptureOmission{rootID, name, reason})
+			omitted = append(omitted, CaptureOmission{binding.ID, name, reason})
 			if entry.IsDir() {
 				return fs.SkipDir
 			}
@@ -62,7 +65,7 @@ func captureTree(ctx context.Context, source, target, rootID string) ([]CaptureF
 					sqlite := isSQLiteFile(f)
 					_ = f.Close()
 					if sqlite {
-						omitted = append(omitted, CaptureOmission{rootID, name, "included through SQLite online backup"})
+						omitted = append(omitted, CaptureOmission{binding.ID, name, "included through SQLite online backup"})
 						return nil
 					}
 				}
@@ -72,7 +75,7 @@ func captureTree(ctx context.Context, source, target, rootID string) ([]CaptureF
 		if err != nil {
 			return err
 		}
-		file, err := captureRootFile(ctx, root, filepath.FromSlash(name), destination, rootID, name, info)
+		file, err := captureRootFile(ctx, root, filepath.FromSlash(name), destination, binding.ID, name, info)
 		if err != nil {
 			return fmt.Errorf("capture %s: %w", name, err)
 		}
@@ -84,7 +87,7 @@ func captureTree(ctx context.Context, source, target, rootID string) ([]CaptureF
 
 func credentialCaptureName(name string) bool {
 	switch strings.ToLower(name) {
-	case "auth.json", ".credentials.json", "credentials.json", "credentials", "settings.json", "settings.local.json", "mcp.json", "mcp_settings.json", "config.toml", "config.json", ".claude.json", ".env":
+	case "auth.json", ".credentials.json", "credentials.json", "credentials", ".git-credentials", "settings.json", "settings.local.json", "mcp.json", "mcp_settings.json", "config.toml", "config.json", ".claude.json", ".env":
 		return true
 	}
 	return strings.HasPrefix(strings.ToLower(name), ".env.")

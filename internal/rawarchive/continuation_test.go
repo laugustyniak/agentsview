@@ -50,10 +50,12 @@ func TestClaudeContinuationArchiveReparse(t *testing.T) {
 			if mode == "missing" {
 				require.NoError(t, os.Remove(paths[1]))
 			}
+			require.NoError(t, database.EnableArchiveOnly(ctx))
 			archive, err := Open(ctx, database, data, nil)
 			require.NoError(t, err)
 			defer archive.Close()
-			spec := ImportSpec{DeviceID: device, Machine: "source", Roots: []RootSpec{{ID: "claude", Provider: "claude", Path: root, OriginalPath: root}}}
+			capture := newImportCapture(t, device, "source", RootSpec{Provider: "claude", Path: root})
+			spec := loadTestCapture(t, &capture)
 			report, err := archive.Import(ctx, spec)
 			require.NoError(t, err)
 			require.Empty(t, report.Gaps)

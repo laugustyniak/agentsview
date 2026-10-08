@@ -425,10 +425,19 @@ func (d *DB) CopySyncStateFrom(sourcePath string) error {
 		}
 	}
 
-	for _, table := range []string{"raw_archive_roots", "raw_archive_files", "raw_archive_sources", "raw_archive_heads", "raw_archive_devices", "raw_archive_sessions"} {
-		if oldDBHasTable(ctx, tx, table) {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO main."+table+" SELECT * FROM old_db."+table); err != nil {
-				return fmt.Errorf("copying %s: %w", table, err)
+	for _, tableCopy := range []struct{ table, columns string }{
+		{"raw_archive_roots", "id,device_id,machine,provider,original_path,configured_root_id"},
+		{"raw_archive_files", "id,root_id,path,sha256,size,mod_time_ns,covered"},
+		{"raw_archive_sources", rawSourceColumns},
+		{"raw_archive_heads", "root_id,source_key,manifest_id"},
+		{"raw_archive_devices", "device_id,suppressions"},
+		{"raw_archive_sessions", "device_id,provider,parser_id,session_id,root_id,source_key"},
+	} {
+		if oldDBHasTable(ctx, tx, tableCopy.table) {
+			query := "INSERT INTO main." + tableCopy.table + " (" + tableCopy.columns +
+				") SELECT " + tableCopy.columns + " FROM old_db." + tableCopy.table
+			if _, err := tx.ExecContext(ctx, query); err != nil {
+				return fmt.Errorf("copying %s: %w", tableCopy.table, err)
 			}
 		}
 	}

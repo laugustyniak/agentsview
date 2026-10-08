@@ -20,6 +20,9 @@ const (
 	pageSize  = 128
 )
 
+var ErrArchiveOnlyRequired = errors.New("archive commands require an archive-only target; " +
+	"use archive import --seed with AGENTSVIEW_DATA_DIR set to a new directory")
+
 // Archive shares the caller's database and exclusively owns its raw vault.
 type Archive struct {
 	database   *db.DB
@@ -33,6 +36,13 @@ type Archive struct {
 func Open(ctx context.Context, database *db.DB, dataDir string, progress func(string)) (*Archive, error) {
 	if database == nil {
 		return nil, errors.New("archive database is required")
+	}
+	archiveOnly, err := database.IsArchiveOnly(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !archiveOnly {
+		return nil, ErrArchiveOnlyRequired
 	}
 	tenant, err := database.GetOrCreateArchiveID(ctx)
 	if err != nil {

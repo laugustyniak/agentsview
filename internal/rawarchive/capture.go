@@ -68,7 +68,12 @@ func Capture(ctx context.Context, opts CaptureOptions) (d CaptureDescriptor, ret
 	}
 	var previous CaptureDescriptor
 	if opts.IdentityFrom != "" {
-		previous, err = LoadCapture(ctx, opts.IdentityFrom)
+		root, err := os.OpenRoot(filepath.Dir(opts.IdentityFrom))
+		if err != nil {
+			return d, fmt.Errorf("previous capture: %w", err)
+		}
+		previous, _, err = readCaptureDescriptor(ctx, root, filepath.Base(opts.IdentityFrom))
+		err = errors.Join(err, root.Close())
 		if err != nil {
 			return d, fmt.Errorf("previous capture: %w", err)
 		}
@@ -172,7 +177,14 @@ func Capture(ctx context.Context, opts CaptureOptions) (d CaptureDescriptor, ret
 		input.Path = "roots/" + input.ID
 		d.Source.Roots = append(d.Source.Roots, input)
 	}
-	d.Source.Roots = append(d.Source.Roots, RootSpec{ID: "application", Provider: "files", Path: "roots/application", OriginalPath: source, ConfiguredPath: source})
+	applicationOrigin := source
+	for _, root := range previous.Source.Roots {
+		if root.ID == "application" {
+			applicationOrigin = root.OriginalPath
+			break
+		}
+	}
+	d.Source.Roots = append(d.Source.Roots, RootSpec{ID: "application", Provider: "files", Path: "roots/application", OriginalPath: applicationOrigin, ConfiguredPath: source})
 	stage, err := os.MkdirTemp(filepath.Dir(target), ".capture-")
 	if err != nil {
 		return d, err
@@ -186,7 +198,7 @@ func Capture(ctx context.Context, opts CaptureOptions) (d CaptureDescriptor, ret
 		if opts.Progress != nil {
 			opts.Progress("Capturing " + root.Provider + " root " + root.ID)
 		}
-		files, omissions, err := captureTree(ctx, root.OriginalPath, filepath.Join(stage, root.Path), root.ID)
+		files, omissions, err := captureTree(ctx, root.OriginalPath, filepath.Join(stage, root.Path), root)
 		if err != nil {
 			return d, err
 		}
@@ -210,7 +222,7 @@ func Capture(ctx context.Context, opts CaptureOptions) (d CaptureDescriptor, ret
 			return d, err
 		}
 		if info.IsDir() {
-			files, omissions, err := captureTree(ctx, path, filepath.Join(app, name), "application")
+			files, omissions, err := captureTree(ctx, path, filepath.Join(app, name), RootSpec{ID: "application", Provider: "files"})
 			if err != nil {
 				return d, err
 			}

@@ -32,10 +32,15 @@ func TestRejectedIdentityKeepsHistoryAndChangedImportKeepsHead(t *testing.T) {
 	// Reject that collision after parsing without publishing scratch writes.
 	data := t.TempDir()
 	dbtest.WriteTestFile(t, filepath.Join(data, "telemetry-install-id"), []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	require.NoError(t, database.EnableArchiveOnly(ctx))
 	archive, err := Open(ctx, database, data, nil)
 	require.NoError(t, err)
 	defer archive.Close()
-	spec := ImportSpec{DeviceID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Machine: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Roots: []RootSpec{{ID: "codex", Provider: "codex", Path: root, OriginalPath: filepath.Join(root, "different-origin")}}}
+	capturedRoot := t.TempDir()
+	capturedPath := filepath.Join(capturedRoot, filepath.Base(path))
+	dbtest.WriteTestFile(t, capturedPath, []byte(valid))
+	capture := newImportCapture(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "source", RootSpec{Provider: "codex", Path: capturedRoot})
+	spec := loadTestCapture(t, &capture)
 	report, err := archive.Import(ctx, spec)
 	require.NoError(t, err)
 	require.Empty(t, report.Gaps)
@@ -57,7 +62,8 @@ func TestRejectedIdentityKeepsHistoryAndChangedImportKeepsHead(t *testing.T) {
 	assert.Zero(t, report.Parsed)
 	// A different capture of the same identity is retained but never silently
 	// reparented or allowed to replace the accepted source.
-	require.NoError(t, os.WriteFile(path, []byte(header), 0o600))
+	require.NoError(t, os.WriteFile(capturedPath, []byte(header), 0o600))
+	spec = loadTestCapture(t, &capture)
 	report, err = archive.Import(ctx, spec)
 	require.NoError(t, err)
 	require.Len(t, report.Gaps, 1)
@@ -65,9 +71,15 @@ func TestRejectedIdentityKeepsHistoryAndChangedImportKeepsHead(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, head)
 	assert.Equal(t, source.ManifestID, head.ManifestID)
-	files, err := database.ListRawArchiveFiles(ctx, 0, 10)
+	files, err := database.ListRawArchiveFiles(ctx, 0, 100)
 	require.NoError(t, err)
-	assert.Len(t, files, 2)
+	var versions int
+	for _, file := range files {
+		if file.RootID == source.RootID && file.Path == filepath.Base(path) {
+			versions++
+		}
+	}
+	assert.Equal(t, 2, versions)
 	target := filepath.Join(t.TempDir(), "native")
 	_, err = archive.Extract(ctx, target, "")
 	require.Error(t, err)
@@ -81,16 +93,19 @@ func TestReparseRejectsBatchIdentityCollision(t *testing.T) {
 	database := dbtest.OpenTestDB(t)
 	data := t.TempDir()
 	dbtest.WriteTestFile(t, filepath.Join(data, "telemetry-install-id"), []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	require.NoError(t, database.EnableArchiveOnly(ctx))
 	archive, err := Open(ctx, database, data, nil)
 	require.NoError(t, err)
 	defer archive.Close()
 	const id = "019eb791-cf7d-75c1-8439-9ed74c122e02"
-	spec := ImportSpec{DeviceID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Machine: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	var roots []RootSpec
 	for _, name := range []string{"one", "two"} {
 		root := t.TempDir()
 		dbtest.WriteTestFile(t, filepath.Join(root, "project", id+".jsonl"), []byte(testjsonl.NewSessionBuilder().AddClaudeUserWithSessionID("2026-01-01T00:00:00Z", name, id).String()))
-		spec.Roots = append(spec.Roots, RootSpec{ID: name, Provider: "claude", Path: root, OriginalPath: root})
+		roots = append(roots, RootSpec{Provider: "claude", Path: root})
 	}
+	capture := newImportCapture(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "source", roots...)
+	spec := loadTestCapture(t, &capture)
 	report, err := archive.Import(ctx, spec)
 	require.NoError(t, err)
 	require.Equal(t, 2, report.Sources)

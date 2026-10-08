@@ -11,13 +11,19 @@ description: All AgentsView commands, flags, and environment variables
 These commands are under development and are not in the latest release. They
 retain closed captures from several machines, recover their original files, and
 reparse Claude and Codex sessions after the original directories are gone.
-`capture` can snapshot live sources. Stop the destination daemon before import,
-reparse, backup or extraction. Those archive writes refuse to run while another process owns
-the database.
+`capture` can snapshot live SQLite databases. Regular files must stay unchanged
+while copied; a changing transcript aborts the capture. Stop source writers for
+the final retirement capture. Stop the destination daemon before import,
+reparse, backup or extraction. Those archive writes refuse to run while another
+process owns the database.
 
 Use an isolated data directory for the receiving archive. Seed it from the
 capture of the installation being retired, as shown below. Older or alternate
 databases remain supplemental files; these commands do not merge databases.
+After a rehearsal, assemble the final archive in a new directory from final
+captures. Later imports retain changed versions for recovery, but do not update
+already accepted browsable sessions or deletion policy. Ongoing collection and
+source advancement are outside this workflow.
 
 Create a capture on the source machine. Select roots explicitly; `files` retains
 supplemental trees without parsing them:
@@ -39,12 +45,17 @@ known raw-sync root IDs. When it generates identities, the JSON report lists
 them under `new_identities`; pass `--identity-from PREVIOUS/capture.json` on
 subsequent captures to reuse them. A previous descriptor from another
 installation, or conflicting checkpoint identities, causes an error.
+The descriptor alone is sufficient for identity reuse; the older captured files
+are not read. If the source AgentsView data directory moved, identity reuse
+preserves its original application-root binding and records its current
+location separately. Import still requires the complete capture directory.
 
 Regular files are streamed and checked. SQLite databases use online backups,
 including committed WAL contents. Symlinks, special files and recognized
 credential/settings files are omitted and listed. Original application config
 is replaced by allowlisted recovery settings. This does not redact transcripts
-or database content. An ordinary artifact vault currently prevents capture;
+or database content. Exclusions include `.git-credentials` and Claude's `ide/`
+runtime metadata. An ordinary artifact vault currently prevents capture;
 its stopped-owner copying support is still required.
 If the source already contains a raw archive, use `archive backup` to preserve
 its vault as well as its database; `capture` refuses that input.
@@ -80,10 +91,15 @@ not reparse sources or adopt historical machine names. The report's
 `unowned_machines` lists unresolved machine keys with session and worktree-rule
 counts; use `db adopt-machine` only for keys you explicitly own. An existing raw
 archive in the seed is refused; use its `archive backup` recovery point instead.
+Empty and `local` machine labels already denote the seed's own installation and
+are recognized during reparse. Other named machines still require proven
+ownership.
 
 Add another machine's capture with `archive import --spec OTHER/capture.json`,
 then explicitly reparse its accepted sources. Sessions remain attributed to the
 source installation even if the archive moves or a display label changes.
+These commands require an archive-only destination created by seed import or
+restore. They refuse an everyday database instead of converting it.
 Foreign session IDs include that installation ID; equal native IDs or paths on
 different machines remain separate observations. The seed keeps its existing
 session IDs. Unrelated identity collisions stop the reparse without publishing
@@ -108,7 +124,6 @@ agentsview archive verify --repository /media/backup/repository --snapshot SNAPS
 agentsview archive restore /media/backup/repository /restored/archive --snapshot SNAPSHOT_ID
 AGENTSVIEW_DATA_DIR=/restored/archive agentsview archive verify
 AGENTSVIEW_DATA_DIR=/restored/archive agentsview archive reparse --all
-AGENTSVIEW_DATA_DIR=/restored/archive agentsview archive extract /new/native-files
 # Use capture_id from the capture or import report to recover one version:
 AGENTSVIEW_DATA_DIR=/restored/archive agentsview archive extract /new/capture --capture CAPTURE_ID
 ```
@@ -124,8 +139,10 @@ Extraction does not change accepted sources or browsable history.
 
 Without `--capture`, extraction writes all retained native files under their
 archive root IDs. These IDs distinguish installations and providers. If any
-path has different retained versions, this mode fails; select a capture to
-recover the version you want. Failed extraction removes its partial output.
+path has different retained versions, this mode fails before creating output or
+reading content. Repeated captures normally have different database and report
+files, so use `--capture` to choose a complete version. Failed extraction removes
+its partial output.
 
 Import reports retained files and bytes separately from accepted provider
 sources. Files outside Claude and Codex capture plans remain supplemental. A

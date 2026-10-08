@@ -420,6 +420,7 @@ func TestArchiveRestorePreservesCodexSharedPath(t *testing.T) {
 		require.NoError(t, database.InsertMessages(ctx, []db.Message{{SessionID: id, Ordinal: 0, Role: "user", Content: id}}))
 	}
 	require.NoError(t, database.SoftDeleteSession(ctx, "codex:trashed-parent"))
+	require.NoError(t, database.EnableArchiveOnly(ctx))
 	archive, err := rawarchive.Open(ctx, database, data, nil)
 	require.NoError(t, err)
 	require.NoError(t, archive.Close())

@@ -16,6 +16,15 @@ import (
 // a selector, it writes all retained files below their archive root IDs and
 // refuses conflicting contents for the same path.
 func (a *Archive) Extract(ctx context.Context, target, captureID string) (report Report, retErr error) {
+	if captureID == "" {
+		conflict, err := a.database.HasConflictingRawArchiveFiles(ctx)
+		if err != nil {
+			return report, fmt.Errorf("checking retained file versions: %w", err)
+		}
+		if conflict {
+			return report, errors.New("multiple versions of a retained path exist; select a capture with --capture CAPTURE_ID")
+		}
+	}
 	if err := os.Mkdir(target, 0o700); err != nil {
 		return report, err
 	}
