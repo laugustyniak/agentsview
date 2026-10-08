@@ -2,6 +2,7 @@
   import { onDestroy, untrack } from "svelte";
   import { Button } from "@kenn-io/kit-ui";
   import { AnalyticsService, type DbToolUsageAnalysis as ToolUsageAnalysis, type DbSignalSessionExample as SignalSessionExample } from "../../api/generated/index.js";
+  import { agentLabel } from "../../utils/agents.js";
   import { LatestRead } from "../../utils/latest-read.js";
   import { isAbortError } from "../../api/runtime.js";
   import { router } from "../../stores/router.svelte.js";
@@ -260,11 +261,18 @@
               {#if evidenceTotal != null}<p class="rate-note">{m.analytics_tool_evidence_count({ count: evidenceTotal, countLabel: evidenceTotal.toLocaleString() })}</p>{/if}
               {#if evidenceLoading}<p class="rate-note">{m.insights_page_loading_examples()}</p>{/if}
               {#if evidenceError}<p class="error">{evidenceError}</p><Button surface="soft" size="sm" onclick={() => loadEvidence(selectedRate!.tool, selectedRate!.category, selectedRate!.metric)}>{m.shared_retry()}</Button>{/if}
-              {#each evidence as example}
-                <a class="evidence-row" href={router.buildSessionHref(example.session_id, example.message_ordinal == null ? {} : { msg: String(example.message_ordinal) })} onclick={(event) => openSession(event, example)}>
-                  {example.project || m.insights_page_unassigned_project()} · {example.agent} · {m.analytics_tool_latest_matching_call({ date: example.date })} · {m.analytics_tool_matching_calls({ count: example.signal_total })}
-                </a>
-              {/each}
+              <div class="evidence-list">
+                {#each evidence as example}
+                  {@const project = example.project || m.insights_page_unassigned_project()}
+                  <a class="evidence-row" href={router.buildSessionHref(example.session_id, example.message_ordinal == null ? {} : { msg: String(example.message_ordinal) })} onclick={(event) => openSession(event, example)}>
+                    <span class="evidence-main">
+                      <span class="evidence-project" title={project}>{project}</span>
+                      <span class="evidence-meta">{agentLabel(example.agent)} · {m.analytics_tool_latest_matching_call({ date: example.date })}</span>
+                    </span>
+                    <span class="evidence-count">{m.analytics_tool_matching_calls({ count: example.signal_total })}</span>
+                  </a>
+                {/each}
+              </div>
               {#if nextOffset != null}<Button surface="soft" size="sm" disabled={evidenceLoading} onclick={() => loadEvidence(selectedRate!.tool, selectedRate!.category, selectedRate!.metric, nextOffset!)}>{m.analytics_tool_more_sessions()}</Button>{/if}
             </section>
           {/if}
@@ -435,7 +443,36 @@
   .tool-rate { text-align: right; font-family: var(--font-mono); font-size: 10px; }
   .rate-note { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
   .tool-evidence { margin-top: 12px; }
-  .evidence-row { display: block; padding: 6px 4px; font-size: 12px; color: var(--accent-blue); }
+  .evidence-list { display: grid; gap: 2px; margin: 6px 0 8px; }
+  .evidence-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 4px;
+    border-radius: var(--radius-sm);
+    color: inherit;
+    text-decoration: none;
+  }
+  .evidence-row:hover { background: var(--bg-surface-hover); }
+  .evidence-row:hover .evidence-project { color: var(--accent-blue); }
+  .evidence-main { display: grid; gap: 2px; min-width: 0; }
+  .evidence-project {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .evidence-meta { color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .evidence-count {
+    white-space: nowrap;
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
 
   .bar-list {
     display: flex;
@@ -571,6 +608,8 @@
     cursor: pointer;
   }
   @media (max-width: 640px) {
+    .evidence-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    .evidence-count { text-align: left; }
     .tool-table { display: block; overflow: visible; }
     .tool-labels { display: none; }
     .tool-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 10px 4px; }
